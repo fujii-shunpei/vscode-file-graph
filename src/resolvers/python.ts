@@ -54,11 +54,13 @@ export class PythonResolver implements LanguageResolver {
   ): string | null {
     // Relative import: starts with dots
     if (module.startsWith(".")) {
-      return this.resolveRelative(module, currentFile);
+      const result = this.resolveRelative(module, currentFile);
+      return result !== currentFile ? result : null;
     }
 
-    // Absolute import: try from workspace root
-    return this.resolveAbsolute(module, workspaceRoot);
+    // Absolute import: try from workspace root and common layouts
+    const result = this.resolveAbsolute(module, currentFile, workspaceRoot);
+    return result !== currentFile ? result : null;
   }
 
   private resolveRelative(module: string, currentFile: string): string | null {
@@ -84,19 +86,23 @@ export class PythonResolver implements LanguageResolver {
 
   private resolveAbsolute(
     module: string,
+    currentFile: string,
     workspaceRoot: string
   ): string | null {
     const parts = module.replace(/\./g, "/");
 
-    // Try from workspace root directly
-    const result = this.tryResolvePython(path.join(workspaceRoot, parts));
-    if (result) return result;
-
-    // Try common Python project layouts: src/
-    const srcResult = this.tryResolvePython(
-      path.join(workspaceRoot, "src", parts)
-    );
-    if (srcResult) return srcResult;
+    // Walk up from the file's directory to the workspace root, trying each
+    // ancestor as a potential Python path root. This mirrors how Python's
+    // sys.path works when running `cd <dir> && python script.py`.
+    let dir = path.dirname(currentFile);
+    const root = path.resolve(workspaceRoot);
+    while (dir.startsWith(root)) {
+      const result = this.tryResolvePython(path.join(dir, parts));
+      if (result) return result;
+      const parent = path.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
 
     // Not a local module (likely a pip package)
     return null;
