@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { LanguageResolver, ResolvedImport } from "./resolvers/types";
 
+// Types mirrored in webview-ui/src/types/graph.ts (webview process). Keep in sync.
 export interface GraphNode {
   id: string;
   label: string;

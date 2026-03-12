@@ -1,0 +1,146 @@
+/* ===== Controls ===== */
+
+.controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 12px;
+  background: var(--vscode-sideBar-background);
+  border-bottom: 1px solid var(--vscode-panel-border);
+  user-select: none;
+}
+
+.controls-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.controls-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--vscode-descriptionForeground);
+  margin-right: 4px;
+}
+
+.controls-btn {
+  border: 1px solid var(--vscode-panel-border);
+  background: var(--vscode-editor-background);
+  color: var(--vscode-editor-foreground);
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+  line-height: 1.4;
+}
+
+.controls-btn:hover {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground, #fff);
+}
+
+.controls-btn--active {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground, #fff);
+  border-color: var(--vscode-button-background);
+}
+
+/* ===== Legend ===== */
+
+.legend {
+  position: absolute;
+  top: 48px;
+  right: 12px;
+  background: var(--vscode-sideBar-background);
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 4px;
+  padding: 8px 0;
+  min-width: 160px;
+  max-height: calc(100vh - 100px);
+  overflow-y: auto;
+  z-index: 10;
+  user-select: none;
+}
+
+.legend-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--vscode-descriptionForeground);
+  padding: 0 12px 6px;
+}
+
+.legend-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 12px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--vscode-editor-foreground);
+}
+
+.legend-item:hover {
+  background: var(--vscode-editor-background);
+}
+
+.legend-item--disabled {
+  opacity: 0.45;
+}
+
+.legend-item--disabled .legend-name {
+  text-decoration: line-through;
+}
+
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid;
+  flex-shrink: 0;
+}
+
+.legend-name {
+  flex: 1;
+}
+
+.legend-count {
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ===== StatusBar ===== */
+
+.statusbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 4px 12px;
+  background: var(--vscode-sideBar-background);
+  border-top: 1px solid var(--vscode-panel-border);
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  user-select: none;
+}
+
+.statusbar-file {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.statusbar-stats {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
