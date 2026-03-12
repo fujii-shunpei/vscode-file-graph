@@ -6,11 +6,13 @@ import { TypeScriptResolver } from "./resolvers/typescript";
 import { GraphPanel } from "./graphPanel";
 
 let analyzer: DependencyAnalyzer;
+let extensionUri: vscode.Uri;
 let isLive = false;
 let currentDepth = 2;
 let lastFilePath: string | null = null;
 
 export function activate(context: vscode.ExtensionContext) {
+  extensionUri = context.extensionUri;
   analyzer = new DependencyAnalyzer();
   analyzer.registerResolver(new PhpResolver());
   analyzer.registerResolver(new TypeScriptResolver());
@@ -87,7 +89,7 @@ function showGraph(filePath: string): void {
   const graphData = analyzer.analyze(filePath, workspaceRoot, currentDepth);
   const label = path.relative(workspaceRoot, filePath);
 
-  GraphPanel.show(graphData, label, {
+  GraphPanel.show(extensionUri, graphData, label, {
     onMessage(message) {
       if (message.command === "setDepth" && typeof message.depth === "number") {
         currentDepth = message.depth;
