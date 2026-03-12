@@ -21,19 +21,25 @@ export interface GraphData {
 }
 
 const LAYER_PATTERNS: Record<string, RegExp[]> = {
-  Controller: [/controllers?\//i, /Controller\.php$/i],
-  Request: [/requests?\//i, /Request\.php$/i],
-  UseCase: [/usecases?\//i, /actions?\//i, /UseCase\.php$/i, /Action\.php$/i],
-  Service: [/services?\//i, /Service\.php$/i],
-  Model: [/models?\//i, /entities?\//i, /Entity\.php$/i],
-  Repository: [/repositor(y|ies)\//i, /Repository\.php$/i],
-  Event: [/events?\//i, /Event\.php$/i],
-  Job: [/jobs?\//i, /Job\.php$/i],
-  Mail: [/mail\//i, /Mail\.php$/i],
-  Middleware: [/middleware\//i, /Middleware\.php$/i],
+  Controller: [/controllers?\//i, /Controller\.(php|ts|js)$/i],
+  Request: [/requests?\//i, /Request\.(php|ts|js)$/i, /\.dto\.(ts|js)$/i, /dtos?\//i],
+  UseCase: [/usecases?\//i, /actions?\//i, /UseCase\.(php|ts|js)$/i, /Action\.(php|ts|js)$/i],
+  Service: [/services?\//i, /Service\.(php|ts|js)$/i],
+  Model: [/models?\//i, /entities?\//i, /Entity\.(php|ts|js)$/i, /\.entity\.(ts|js)$/i],
+  Repository: [/repositor(y|ies)\//i, /Repository\.(php|ts|js)$/i, /\.repository\.(ts|js)$/i],
+  Event: [/events?\//i, /Event\.(php|ts|js)$/i],
+  Job: [/jobs?\//i, /Job\.(php|ts|js)$/i, /queues?\//i, /workers?\//i],
+  Mail: [/mail\//i, /Mail\.(php|ts|js)$/i],
+  Middleware: [/middleware\//i, /Middleware\.(php|ts|js)$/i, /\.middleware\.(ts|js)$/i],
   Migration: [/migrations?\//i],
   Config: [/config\//i],
-  Route: [/routes?\//i],
+  Route: [/routes?\//i, /\.routes\.(ts|js)$/i, /router\//i],
+  Component: [/components?\//i, /\.component\.(ts|tsx|js|jsx)$/i],
+  Hook: [/hooks?\//i, /use[A-Z][\w]*\.(ts|js)$/],
+  Store: [/stores?\//i, /\.store\.(ts|js)$/i, /\.slice\.(ts|js)$/i, /reducers?\//i],
+  Util: [/utils?\//i, /helpers?\//i, /lib\//i],
+  Type: [/types?\//i, /interfaces?\//i, /\.type\.(ts|js)$/i, /\.d\.ts$/i],
+  Test: [/(__tests__|tests?|spec)\//i, /\.(test|spec)\.(ts|tsx|js|jsx)$/i],
 };
 
 function detectLayer(filePath: string): string {
