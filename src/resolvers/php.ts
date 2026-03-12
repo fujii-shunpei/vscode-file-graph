@@ -12,14 +12,46 @@ export class PhpResolver implements LanguageResolver {
     workspaceRoot: string
   ): ResolvedImport[] {
     const imports: ResolvedImport[] = [];
+    const seen = new Set<string>();
+
+    // Collect `use` namespace prefixes for resolving relative ::class references
+    // e.g., `use App\Http\Controllers;` -> prefix "Controllers" maps to "App\Http\Controllers"
+    const useAliases: Record<string, string> = {};
 
     // PSR-4 `use` statements: use App\Models\User;
-    const useRegex = /^\s*use\s+([\w\\]+)(?:\s+as\s+\w+)?;/gm;
+    const useRegex = /^\s*use\s+([\w\\]+)(?:\s+as\s+(\w+))?;/gm;
     let match;
     while ((match = useRegex.exec(content)) !== null) {
       const fqcn = match[1];
+      const alias = match[2] || fqcn.split("\\").pop() || "";
       const resolved = this.resolveNamespace(fqcn, workspaceRoot);
-      imports.push({ raw: fqcn, resolvedPath: resolved, type: "use" });
+
+      // Register alias for relative ::class resolution
+      useAliases[alias] = fqcn;
+
+      if (resolved) {
+        if (!seen.has(resolved)) {
+          seen.add(resolved);
+          imports.push({ raw: fqcn, resolvedPath: resolved, type: "use" });
+        }
+      }
+      // If not resolved, it might be a namespace prefix (e.g., `use App\Http\Controllers;`)
+      // The alias is still registered for ::class resolution below
+    }
+
+    // ::class references: Controllers\Admin\ReserveBoardController::class
+    // Also matches: SomeClass::class
+    const classRefRegex = /([\w\\]+)::class/g;
+    while ((match = classRefRegex.exec(content)) !== null) {
+      const ref = match[1];
+      const fqcn = this.resolveClassRef(ref, useAliases);
+      if (!fqcn) continue;
+
+      const resolved = this.resolveNamespace(fqcn, workspaceRoot);
+      if (resolved && !seen.has(resolved)) {
+        seen.add(resolved);
+        imports.push({ raw: fqcn, resolvedPath: resolved, type: "class-ref" });
+      }
     }
 
     // require / require_once / include / include_once
@@ -29,10 +61,42 @@ export class PhpResolver implements LanguageResolver {
       const type = match[1];
       const target = match[2];
       const resolved = this.resolveRelativePath(target, filePath, workspaceRoot);
-      imports.push({ raw: target, resolvedPath: resolved, type });
+      if (resolved && !seen.has(resolved)) {
+        seen.add(resolved);
+        imports.push({ raw: target, resolvedPath: resolved, type });
+      }
     }
 
     return imports;
+  }
+
+  /**
+   * Resolve a relative ::class reference using use-imported aliases.
+   * e.g., "Controllers\Admin\ReserveBoardController" with alias
+   *   "Controllers" -> "App\Http\Controllers"
+   * becomes "App\Http\Controllers\Admin\ReserveBoardController"
+   */
+  private resolveClassRef(
+    ref: string,
+    useAliases: Record<string, string>
+  ): string | null {
+    // Already fully qualified
+    if (ref.startsWith("\\")) return ref.slice(1);
+
+    // Try to match the first segment against use aliases
+    const firstSeg = ref.split("\\")[0];
+    const rest = ref.includes("\\") ? ref.slice(firstSeg.length + 1) : "";
+
+    if (useAliases[firstSeg]) {
+      const base = useAliases[firstSeg];
+      return rest ? base + "\\" + rest : base;
+    }
+
+    // If it's a simple name (no backslash), it might be a directly imported class
+    // Already handled by the `use` import above, skip to avoid duplicate
+    if (!ref.includes("\\")) return null;
+
+    return null;
   }
 
   private resolveNamespace(
