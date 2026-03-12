@@ -4,7 +4,7 @@
 
 開いているファイルの `import` / `use` を解析し、DDD のレイヤー構造に沿った段組みレイアウトで表示します。タブを切り替えるだけでグラフが自動更新されます。
 
-![概要](docs/screenshot.png)
+<!-- TODO: スクリーンショットを追加 -->
 
 ## 特徴
 
@@ -23,11 +23,12 @@
 | 言語 | 検出するパターン | 状態 |
 |------|----------------|------|
 | PHP / Laravel | `use App\...`, `require`, `include` | 対応済み |
-| TypeScript / JavaScript | `import`, `require` | 予定 |
+| TypeScript / JavaScript | `import ... from`, `require()`, `export ... from` | 対応済み |
 | Python | `import`, `from ... import` | 予定 |
 | Go | `import` | 予定 |
 
-PHP は `composer.json` の PSR-4 autoload 設定を読んでパス解決します。
+- PHP: `composer.json` の PSR-4 autoload 設定を読んでパス解決
+- TS/JS: `tsconfig.json` / `jsconfig.json` の `paths` エイリアス、`@/` プレフィックスに対応
 
 ## DDD レイヤー自動判定
 

@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import * as path from "path";
 import { DependencyAnalyzer } from "./analyzer";
 import { PhpResolver } from "./resolvers/php";
+import { TypeScriptResolver } from "./resolvers/typescript";
 import { GraphPanel } from "./graphPanel";
 
 let analyzer: DependencyAnalyzer;
@@ -12,6 +13,11 @@ let lastFilePath: string | null = null;
 export function activate(context: vscode.ExtensionContext) {
   analyzer = new DependencyAnalyzer();
   analyzer.registerResolver(new PhpResolver());
+  analyzer.registerResolver(new TypeScriptResolver());
+
+  const supportedExtensions = new Set([
+    ".php", ".ts", ".tsx", ".js", ".jsx",
+  ]);
 
   // Show graph from current file (and start live tracking)
   const showFromFile = vscode.commands.registerCommand(
@@ -33,7 +39,7 @@ export function activate(context: vscode.ExtensionContext) {
     async () => {
       const files = await vscode.window.showOpenDialog({
         canSelectMany: false,
-        filters: { "PHP Files": ["php"] },
+        filters: { "Source Files": ["php", "ts", "tsx", "js", "jsx"] },
       });
       if (files && files[0]) {
         isLive = true;
@@ -48,9 +54,8 @@ export function activate(context: vscode.ExtensionContext) {
       if (!isLive || !editor) return;
       // Don't react to the graph panel itself
       if (editor.document.uri.scheme !== "file") return;
-      // Check if the file is a supported type
       const ext = path.extname(editor.document.uri.fsPath);
-      if (ext === ".php") {
+      if (supportedExtensions.has(ext)) {
         showGraph(editor.document.uri.fsPath);
       }
     }
@@ -61,7 +66,7 @@ export function activate(context: vscode.ExtensionContext) {
     analyzer.clearCache();
     if (isLive && GraphPanel.currentPanel && doc.uri.scheme === "file") {
       const ext = path.extname(doc.uri.fsPath);
-      if (ext === ".php") {
+      if (supportedExtensions.has(ext)) {
         showGraph(doc.uri.fsPath);
       }
     }

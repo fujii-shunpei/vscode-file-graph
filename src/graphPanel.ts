@@ -270,6 +270,12 @@ const LAYER_COLORS = {
   Mail:        '#4dd0e1',
   Model:       '#ffb74d',
   Repository:  '#ff8a65',
+  Component:   '#64b5f6',
+  Hook:        '#4db6ac',
+  Store:       '#e57373',
+  Util:        '#b0bec5',
+  Type:        '#9fa8da',
+  Test:        '#a5d6a7',
   Migration:   '#90a4ae',
   Config:      '#78909c',
   Other:       '#bdbdbd',
@@ -277,9 +283,12 @@ const LAYER_COLORS = {
 
 // Layer order for hierarchical layout (top to bottom)
 const LAYER_ORDER = [
-  'Route', 'Middleware', 'Controller', 'Request',
-  'UseCase', 'Service', 'Event', 'Job', 'Mail',
-  'Model', 'Repository', 'Migration', 'Config', 'Other'
+  'Route', 'Middleware', 'Controller', 'Component', 'Request',
+  'UseCase', 'Service', 'Hook', 'Store',
+  'Event', 'Job', 'Mail',
+  'Model', 'Repository',
+  'Util', 'Type', 'Test',
+  'Migration', 'Config', 'Other'
 ];
 
 const NS = 'http://www.w3.org/2000/svg';
@@ -439,7 +448,7 @@ function buildGraph(graphData) {
     text.setAttribute('fill', '#fff');
     text.setAttribute('font-size', '12');
     text.setAttribute('font-weight', n.isFocused ? 'bold' : 'normal');
-    text.textContent = truncate(fileName, 18);
+    text.textContent = truncate(fileName.replace(/\.(tsx?|jsx?|php)$/, ''), 18);
     group.appendChild(text);
 
     // Directory path
