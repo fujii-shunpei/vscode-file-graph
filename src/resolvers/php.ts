@@ -96,7 +96,9 @@ export class PhpResolver implements LanguageResolver {
     // Already handled by the `use` import above, skip to avoid duplicate
     if (!ref.includes("\\")) return null;
 
-    return null;
+    // Qualified name without alias match — treat as FQCN
+    // e.g., App\Http\Controllers\HomeController::class
+    return ref;
   }
 
   private resolveNamespace(
