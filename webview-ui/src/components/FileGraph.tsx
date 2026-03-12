@@ -108,7 +108,7 @@ const FileNode: FC<NodeProps<Node<FileNodeData>>> = memo(({ data }) => {
     overflow: "hidden",
     opacity: dimmed ? 0.25 : 1,
     transition: "opacity 0.15s ease, border-color 0.15s ease",
-    cursor: "pointer",
+    cursor: "default",
   };
 
   const nameStyle: CSSProperties = {
@@ -241,7 +241,7 @@ function buildNodes(
         isFocused: gn.isFocused,
         dimmed: dimmedNodeIds.has(gn.id),
       },
-      draggable: true,
+      draggable: false,
     };
   });
 }
@@ -382,7 +382,7 @@ export const FileGraph: FC<FileGraphProps> = ({
 
   // ---- Callbacks -----------------------------------------------------------
 
-  const handleNodeClick = useCallback(
+  const handleNodeDoubleClick = useCallback(
     (_event: React.MouseEvent, node: Node) => {
       onNodeClick(node.id);
     },
@@ -409,7 +409,7 @@ export const FileGraph: FC<FileGraphProps> = ({
         edges={edges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
-        onNodeClick={handleNodeClick}
+        onNodeDoubleClick={handleNodeDoubleClick}
         onNodeMouseEnter={handleNodeMouseEnter}
         onNodeMouseLeave={handleNodeMouseLeave}
         nodeTypes={nodeTypes}
