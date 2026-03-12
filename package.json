@@ -1,0 +1,42 @@
+{
+  "name": "file-graph",
+  "displayName": "File Graph",
+  "description": "Visualize file dependencies as an interactive graph",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Visualization"],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "fileGraph.showGraph",
+        "title": "File Graph: Show Dependency Graph"
+      },
+      {
+        "command": "fileGraph.showGraphFromFile",
+        "title": "File Graph: Show Graph from Current File"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "fileGraph.showGraphFromFile",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0"
+  }
+}

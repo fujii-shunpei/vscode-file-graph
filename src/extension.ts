@@ -1,0 +1,104 @@
+import * as vscode from "vscode";
+import * as path from "path";
+import { DependencyAnalyzer } from "./analyzer";
+import { PhpResolver } from "./resolvers/php";
+import { GraphPanel } from "./graphPanel";
+
+let analyzer: DependencyAnalyzer;
+let isLive = false;
+let currentDepth = 2;
+let lastFilePath: string | null = null;
+
+export function activate(context: vscode.ExtensionContext) {
+  analyzer = new DependencyAnalyzer();
+  analyzer.registerResolver(new PhpResolver());
+
+  // Show graph from current file (and start live tracking)
+  const showFromFile = vscode.commands.registerCommand(
+    "fileGraph.showGraphFromFile",
+    () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) {
+        vscode.window.showWarningMessage("No file is currently open.");
+        return;
+      }
+      isLive = true;
+      showGraph(editor.document.uri.fsPath);
+    }
+  );
+
+  // Show graph with file picker
+  const showWithPicker = vscode.commands.registerCommand(
+    "fileGraph.showGraph",
+    async () => {
+      const files = await vscode.window.showOpenDialog({
+        canSelectMany: false,
+        filters: { "PHP Files": ["php"] },
+      });
+      if (files && files[0]) {
+        isLive = true;
+        showGraph(files[0].fsPath);
+      }
+    }
+  );
+
+  // Auto-update when active editor changes
+  const onEditorChange = vscode.window.onDidChangeActiveTextEditor(
+    (editor) => {
+      if (!isLive || !editor) return;
+      // Don't react to the graph panel itself
+      if (editor.document.uri.scheme !== "file") return;
+      // Check if the file is a supported type
+      const ext = path.extname(editor.document.uri.fsPath);
+      if (ext === ".php") {
+        showGraph(editor.document.uri.fsPath);
+      }
+    }
+  );
+
+  // Clear cache and refresh on file save
+  const onSave = vscode.workspace.onDidSaveTextDocument((doc) => {
+    analyzer.clearCache();
+    if (isLive && GraphPanel.currentPanel && doc.uri.scheme === "file") {
+      const ext = path.extname(doc.uri.fsPath);
+      if (ext === ".php") {
+        showGraph(doc.uri.fsPath);
+      }
+    }
+  });
+
+  context.subscriptions.push(showFromFile, showWithPicker, onEditorChange, onSave);
+}
+
+function showGraph(filePath: string): void {
+  const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+  if (!workspaceFolder) {
+    vscode.window.showWarningMessage("No workspace folder is open.");
+    return;
+  }
+
+  lastFilePath = filePath;
+  const workspaceRoot = workspaceFolder.uri.fsPath;
+  analyzer.clearCache();
+  const graphData = analyzer.analyze(filePath, workspaceRoot, currentDepth);
+  const label = path.relative(workspaceRoot, filePath);
+
+  const panel = GraphPanel.show(graphData, label);
+
+  // Handle depth change from webview
+  panel.onMessage((message) => {
+    if (message.command === "setDepth" && typeof message.depth === "number") {
+      currentDepth = message.depth;
+      if (lastFilePath) {
+        showGraph(lastFilePath);
+      }
+    }
+  });
+
+  // Stop live tracking when panel is closed
+  panel.onDispose(() => {
+    isLive = false;
+  });
+}
+
+export function deactivate() {}
