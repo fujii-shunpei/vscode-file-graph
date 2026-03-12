@@ -3,6 +3,7 @@ import * as path from "path";
 import { DependencyAnalyzer } from "./analyzer";
 import { PhpResolver } from "./resolvers/php";
 import { TypeScriptResolver } from "./resolvers/typescript";
+import { PythonResolver } from "./resolvers/python";
 import { GraphPanel } from "./graphPanel";
 
 let analyzer: DependencyAnalyzer;
@@ -16,9 +17,10 @@ export function activate(context: vscode.ExtensionContext) {
   analyzer = new DependencyAnalyzer();
   analyzer.registerResolver(new PhpResolver());
   analyzer.registerResolver(new TypeScriptResolver());
+  analyzer.registerResolver(new PythonResolver());
 
   const supportedExtensions = new Set([
-    ".php", ".ts", ".tsx", ".js", ".jsx",
+    ".php", ".ts", ".tsx", ".js", ".jsx", ".py",
   ]);
 
   // Show graph from current file (and start live tracking)
@@ -41,7 +43,7 @@ export function activate(context: vscode.ExtensionContext) {
     async () => {
       const files = await vscode.window.showOpenDialog({
         canSelectMany: false,
-        filters: { "Source Files": ["php", "ts", "tsx", "js", "jsx"] },
+        filters: { "Source Files": ["php", "ts", "tsx", "js", "jsx", "py"] },
       });
       if (files && files[0]) {
         isLive = true;
