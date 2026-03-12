@@ -2,7 +2,7 @@
   "name": "file-graph",
   "displayName": "File Graph",
   "description": "Visualize file dependencies as an interactive graph",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "engines": {
     "vscode": "^1.85.0"
   },
