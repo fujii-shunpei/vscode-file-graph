@@ -20,26 +20,31 @@ export interface GraphData {
   edges: GraphEdge[];
 }
 
+// Extension pattern: (php|tsx?|jsx?) covers .php, .ts, .tsx, .js, .jsx
+const EXT = String.raw`(php|tsx?|jsx?)`;
+
 const LAYER_PATTERNS: Record<string, RegExp[]> = {
-  Controller: [/controllers?\//i, /Controller\.(php|ts|js)$/i],
-  Request: [/requests?\//i, /Request\.(php|ts|js)$/i, /\.dto\.(ts|js)$/i, /dtos?\//i],
-  UseCase: [/usecases?\//i, /actions?\//i, /UseCase\.(php|ts|js)$/i, /Action\.(php|ts|js)$/i],
-  Service: [/services?\//i, /Service\.(php|ts|js)$/i],
-  Model: [/models?\//i, /entities?\//i, /Entity\.(php|ts|js)$/i, /\.entity\.(ts|js)$/i],
-  Repository: [/repositor(y|ies)\//i, /Repository\.(php|ts|js)$/i, /\.repository\.(ts|js)$/i],
-  Event: [/events?\//i, /Event\.(php|ts|js)$/i],
-  Job: [/jobs?\//i, /Job\.(php|ts|js)$/i, /queues?\//i, /workers?\//i],
-  Mail: [/mail\//i, /Mail\.(php|ts|js)$/i],
-  Middleware: [/middleware\//i, /Middleware\.(php|ts|js)$/i, /\.middleware\.(ts|js)$/i],
+  Controller: [/controllers?\//i, new RegExp(`Controller\\.${EXT}$`, "i")],
+  Request: [/requests?\//i, new RegExp(`Request\\.${EXT}$`, "i"), new RegExp(`\\.dto\\.${EXT}$`, "i"), /dtos?\//i],
+  UseCase: [/usecases?\//i, /actions?\//i, new RegExp(`UseCase\\.${EXT}$`, "i"), new RegExp(`Action\\.${EXT}$`, "i")],
+  Service: [/services?\//i, new RegExp(`Service\\.${EXT}$`, "i")],
+  Model: [/models?\//i, /entities?\//i, new RegExp(`Entity\\.${EXT}$`, "i"), new RegExp(`\\.entity\\.${EXT}$`, "i")],
+  Repository: [/repositor(y|ies)\//i, new RegExp(`Repository\\.${EXT}$`, "i"), new RegExp(`\\.repository\\.${EXT}$`, "i")],
+  Event: [/events?\//i, new RegExp(`Event\\.${EXT}$`, "i")],
+  Job: [/jobs?\//i, new RegExp(`Job\\.${EXT}$`, "i"), /queues?\//i, /workers?\//i],
+  Mail: [/mail\//i, new RegExp(`Mail\\.${EXT}$`, "i")],
+  Middleware: [/middleware\//i, new RegExp(`Middleware\\.${EXT}$`, "i"), new RegExp(`\\.middleware\\.${EXT}$`, "i")],
   Migration: [/migrations?\//i],
   Config: [/config\//i],
-  Route: [/routes?\//i, /\.routes\.(ts|js)$/i, /router\//i],
-  Component: [/components?\//i, /\.component\.(ts|tsx|js|jsx)$/i],
-  Hook: [/hooks?\//i, /use[A-Z][\w]*\.(ts|js)$/],
-  Store: [/stores?\//i, /\.store\.(ts|js)$/i, /\.slice\.(ts|js)$/i, /reducers?\//i],
+  Route: [/routes?\//i, new RegExp(`\\.routes\\.${EXT}$`, "i"), /router\//i],
+  Component: [/components?\//i, new RegExp(`\\.component\\.${EXT}$`, "i")],
+  Hook: [/hooks?\//i, new RegExp(`use[A-Z][\\w]*\\.${EXT}$`)],
+  Store: [/stores?\//i, new RegExp(`\\.store\\.${EXT}$`, "i"), new RegExp(`\\.slice\\.${EXT}$`, "i"), /reducers?\//i],
+  Page: [/pages?\//i, /views?\//i, /screens?\//i],
+  API: [/(?:^|\/)api\//i, new RegExp(`\\.api\\.${EXT}$`, "i")],
   Util: [/utils?\//i, /helpers?\//i, /lib\//i],
-  Type: [/types?\//i, /interfaces?\//i, /\.type\.(ts|js)$/i, /\.d\.ts$/i],
-  Test: [/(__tests__|tests?|spec)\//i, /\.(test|spec)\.(ts|tsx|js|jsx)$/i],
+  Type: [/types?\//i, /interfaces?\//i, new RegExp(`\\.type\\.${EXT}$`, "i"), /\.d\.ts$/i],
+  Test: [/(__tests__|tests?|spec)\//i, new RegExp(`\\.(test|spec)\\.${EXT}$`, "i")],
 };
 
 function detectLayer(filePath: string): string {
@@ -217,6 +222,12 @@ export class DependencyAnalyzer {
     }
   }
 
+  private static readonly SKIP_DIRS = new Set([
+    "node_modules", "vendor", ".git", "storage", "bootstrap", "public",
+    ".idea", ".vscode", "dist", "build", "out", ".next", ".nuxt",
+    "coverage", ".turbo", ".cache",
+  ]);
+
   private collectFiles(
     dir: string,
     result: string[] = [],
@@ -224,22 +235,11 @@ export class DependencyAnalyzer {
   ): string[] {
     if (depth > 10) return result;
 
-    const skipDirs = new Set([
-      "node_modules",
-      "vendor",
-      ".git",
-      "storage",
-      "bootstrap",
-      "public",
-      ".idea",
-      ".vscode",
-    ]);
-
     try {
       const entries = fs.readdirSync(dir, { withFileTypes: true });
       for (const entry of entries) {
         if (entry.isDirectory()) {
-          if (!skipDirs.has(entry.name)) {
+          if (!DependencyAnalyzer.SKIP_DIRS.has(entry.name)) {
             this.collectFiles(
               path.join(dir, entry.name),
               result,
@@ -266,5 +266,8 @@ export class DependencyAnalyzer {
 
   clearCache(): void {
     this.fileCache.clear();
+    for (const resolver of this.resolvers) {
+      resolver.clearCache?.();
+    }
   }
 }

@@ -1,12 +1,16 @@
 import * as vscode from "vscode";
 import { GraphData } from "./analyzer";
 
+export interface PanelCallbacks {
+  onMessage?: (message: any) => void;
+  onDispose?: () => void;
+}
+
 export class GraphPanel {
   public static currentPanel: GraphPanel | undefined;
   private readonly panel: vscode.WebviewPanel;
   private disposables: vscode.Disposable[] = [];
-  private disposeCallbacks: (() => void)[] = [];
-  private messageCallbacks: ((message: any) => void)[] = [];
+  private callbacks: PanelCallbacks = {};
   private initialized = false;
 
   private constructor(panel: vscode.WebviewPanel) {
@@ -20,18 +24,19 @@ export class GraphPanel {
           const uri = vscode.Uri.file(message.filePath);
           vscode.window.showTextDocument(uri, { viewColumn: vscode.ViewColumn.One });
         }
-        this.messageCallbacks.forEach((cb) => cb(message));
+        this.callbacks.onMessage?.(message);
       },
       null,
       this.disposables
     );
   }
 
-  static show(graphData: GraphData, focusLabel: string): GraphPanel {
+  static show(graphData: GraphData, focusLabel: string, callbacks?: PanelCallbacks): GraphPanel {
     const column = vscode.ViewColumn.Beside;
 
     if (GraphPanel.currentPanel) {
       GraphPanel.currentPanel.panel.reveal(column);
+      if (callbacks) GraphPanel.currentPanel.callbacks = callbacks;
       GraphPanel.currentPanel.update(graphData, focusLabel);
       return GraphPanel.currentPanel;
     }
@@ -47,16 +52,9 @@ export class GraphPanel {
     );
 
     GraphPanel.currentPanel = new GraphPanel(panel);
+    if (callbacks) GraphPanel.currentPanel.callbacks = callbacks;
     GraphPanel.currentPanel.update(graphData, focusLabel);
     return GraphPanel.currentPanel;
-  }
-
-  onDispose(callback: () => void): void {
-    this.disposeCallbacks.push(callback);
-  }
-
-  onMessage(callback: (message: any) => void): void {
-    this.messageCallbacks.push(callback);
   }
 
   private update(graphData: GraphData, focusLabel: string): void {
@@ -273,6 +271,8 @@ const LAYER_COLORS = {
   Component:   '#64b5f6',
   Hook:        '#4db6ac',
   Store:       '#e57373',
+  Page:        '#7986cb',
+  API:         '#ffcc80',
   Util:        '#b0bec5',
   Type:        '#9fa8da',
   Test:        '#a5d6a7',
@@ -283,8 +283,8 @@ const LAYER_COLORS = {
 
 // Layer order for hierarchical layout (top to bottom)
 const LAYER_ORDER = [
-  'Route', 'Middleware', 'Controller', 'Component', 'Request',
-  'UseCase', 'Service', 'Hook', 'Store',
+  'Route', 'Middleware', 'Controller', 'Page', 'Component', 'Request',
+  'UseCase', 'Service', 'Hook', 'Store', 'API',
   'Event', 'Job', 'Mail',
   'Model', 'Repository',
   'Util', 'Type', 'Test',
@@ -756,6 +756,6 @@ buildGraph(${data});
     GraphPanel.currentPanel = undefined;
     this.panel.dispose();
     this.disposables.forEach((d) => d.dispose());
-    this.disposeCallbacks.forEach((cb) => cb());
+    this.callbacks.onDispose?.();
   }
 }

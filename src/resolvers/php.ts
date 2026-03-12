@@ -87,6 +87,10 @@ export class PhpResolver implements LanguageResolver {
     return null;
   }
 
+  clearCache(): void {
+    this.composerCache = null;
+  }
+
   private composerCache: Record<string, string> | null = null;
 
   private loadComposerMappings(workspaceRoot: string): Record<string, string> {

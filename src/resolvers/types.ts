@@ -14,4 +14,6 @@ export interface LanguageResolver {
   fileExtensions: string[];
   /** Extract imports from file content and resolve to file paths */
   resolveImports(content: string, filePath: string, workspaceRoot: string): ResolvedImport[];
+  /** Clear any cached config (tsconfig, composer.json, etc.) */
+  clearCache?(): void;
 }

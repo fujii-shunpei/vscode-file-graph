@@ -2,11 +2,17 @@ import * as path from "path";
 import * as fs from "fs";
 import { LanguageResolver, ResolvedImport } from "./types";
 
+interface TsConfig {
+  paths: Record<string, string[]>;
+  baseUrl: string;
+  compiledPaths: { regex: RegExp; targets: string[] }[];
+}
+
 export class TypeScriptResolver implements LanguageResolver {
   languageIds = ["typescript", "typescriptreact", "javascript", "javascriptreact"];
   fileExtensions = [".ts", ".tsx", ".js", ".jsx"];
 
-  private tsConfigCache: { paths: Record<string, string[]>; baseUrl: string } | null = null;
+  private tsConfigCache: TsConfig | null = null;
 
   resolveImports(
     content: string,
@@ -51,21 +57,29 @@ export class TypeScriptResolver implements LanguageResolver {
     return imports;
   }
 
+  clearCache(): void {
+    this.tsConfigCache = null;
+  }
+
   private resolveSpecifier(
     specifier: string,
     currentFile: string,
     workspaceRoot: string
   ): string | null {
-    // Skip bare module specifiers (node_modules packages)
-    if (!specifier.startsWith(".") && !specifier.startsWith("/") && !specifier.startsWith("@/")) {
-      // Check tsconfig paths for alias resolution
-      return this.resolveAlias(specifier, workspaceRoot);
+    // Relative imports
+    if (specifier.startsWith(".") || specifier.startsWith("/")) {
+      const baseDir = path.dirname(currentFile);
+      const base = path.resolve(baseDir, specifier);
+      return this.tryResolveFile(base);
     }
 
-    // Handle @/ alias (common in many frameworks)
+    // Non-relative: try tsconfig paths alias first
+    const aliasResult = this.resolveAlias(specifier, workspaceRoot);
+    if (aliasResult) return aliasResult;
+
+    // Fallback: @/ -> src/ (common convention even without tsconfig paths)
     if (specifier.startsWith("@/")) {
       const withoutAlias = specifier.slice(2);
-      // Try src/ directory first, then root
       const candidates = [
         path.join(workspaceRoot, "src", withoutAlias),
         path.join(workspaceRoot, withoutAlias),
@@ -74,36 +88,31 @@ export class TypeScriptResolver implements LanguageResolver {
         const resolved = this.tryResolveFile(base);
         if (resolved) return resolved;
       }
-      return this.resolveAlias(specifier, workspaceRoot);
     }
 
-    // Relative import
-    const baseDir = path.dirname(currentFile);
-    const base = path.resolve(baseDir, specifier);
-    return this.tryResolveFile(base);
+    // Bare module specifier (npm package) - not a local file
+    return null;
   }
+
+  private static readonly EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".d.ts"];
 
   private tryResolveFile(base: string): string | null {
     // Exact match
-    if (fs.existsSync(base) && fs.statSync(base).isFile()) {
-      return base;
-    }
+    const stat = fs.statSync(base, { throwIfNoEntry: false });
+    if (stat?.isFile()) return base;
 
     // Try extensions
-    const extensions = [".ts", ".tsx", ".js", ".jsx", ".d.ts"];
-    for (const ext of extensions) {
+    for (const ext of TypeScriptResolver.EXTENSIONS) {
       const candidate = base + ext;
-      if (fs.existsSync(candidate)) {
-        return candidate;
-      }
+      const s = fs.statSync(candidate, { throwIfNoEntry: false });
+      if (s?.isFile()) return candidate;
     }
 
     // Try index files
-    for (const ext of extensions) {
+    for (const ext of TypeScriptResolver.EXTENSIONS) {
       const candidate = path.join(base, "index" + ext);
-      if (fs.existsSync(candidate)) {
-        return candidate;
-      }
+      const s = fs.statSync(candidate, { throwIfNoEntry: false });
+      if (s?.isFile()) return candidate;
     }
 
     return null;
@@ -116,19 +125,12 @@ export class TypeScriptResolver implements LanguageResolver {
     const config = this.loadTsConfig(workspaceRoot);
     if (!config) return null;
 
-    const { paths, baseUrl } = config;
-
-    for (const [pattern, targets] of Object.entries(paths)) {
-      // Convert tsconfig path pattern to regex
-      // e.g., "@/*" -> match "@/anything"
-      const regexStr = "^" + pattern.replace(/\*/g, "(.*)") + "$";
-      const regex = new RegExp(regexStr);
+    for (const { regex, targets } of config.compiledPaths) {
       const match = specifier.match(regex);
-
       if (match) {
         for (const target of targets) {
           const resolved = target.replace(/\*/g, match[1] || "");
-          const fullPath = path.resolve(workspaceRoot, baseUrl, resolved);
+          const fullPath = path.resolve(workspaceRoot, config.baseUrl, resolved);
           const result = this.tryResolveFile(fullPath);
           if (result) return result;
         }
@@ -138,30 +140,32 @@ export class TypeScriptResolver implements LanguageResolver {
     return null;
   }
 
-  private loadTsConfig(
-    workspaceRoot: string
-  ): { paths: Record<string, string[]>; baseUrl: string } | null {
+  private loadTsConfig(workspaceRoot: string): TsConfig | null {
     if (this.tsConfigCache !== null) {
       return this.tsConfigCache;
     }
 
-    // Try tsconfig.json, then jsconfig.json
     const configNames = ["tsconfig.json", "jsconfig.json"];
 
     for (const configName of configNames) {
       const configPath = path.join(workspaceRoot, configName);
-      if (!fs.existsSync(configPath)) continue;
-
       try {
         const raw = fs.readFileSync(configPath, "utf-8");
-        // Strip comments (// and /* */) for JSON parsing
         const cleaned = raw.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
         const config = JSON.parse(cleaned);
         const compilerOptions = config.compilerOptions || {};
+        const paths: Record<string, string[]> = compilerOptions.paths || {};
+
+        // Pre-compile path patterns to regexes
+        const compiledPaths = Object.entries(paths).map(([pattern, targets]) => ({
+          regex: new RegExp("^" + pattern.replace(/\*/g, "(.*)") + "$"),
+          targets: targets as string[],
+        }));
 
         this.tsConfigCache = {
-          paths: compilerOptions.paths || {},
+          paths,
           baseUrl: compilerOptions.baseUrl || ".",
+          compiledPaths,
         };
         return this.tsConfigCache;
       } catch {
@@ -169,7 +173,7 @@ export class TypeScriptResolver implements LanguageResolver {
       }
     }
 
-    this.tsConfigCache = { paths: {}, baseUrl: "." };
+    this.tsConfigCache = { paths: {}, baseUrl: ".", compiledPaths: [] };
     return this.tsConfigCache;
   }
 }

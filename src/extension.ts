@@ -84,25 +84,21 @@ function showGraph(filePath: string): void {
 
   lastFilePath = filePath;
   const workspaceRoot = workspaceFolder.uri.fsPath;
-  analyzer.clearCache();
   const graphData = analyzer.analyze(filePath, workspaceRoot, currentDepth);
   const label = path.relative(workspaceRoot, filePath);
 
-  const panel = GraphPanel.show(graphData, label);
-
-  // Handle depth change from webview
-  panel.onMessage((message) => {
-    if (message.command === "setDepth" && typeof message.depth === "number") {
-      currentDepth = message.depth;
-      if (lastFilePath) {
-        showGraph(lastFilePath);
+  GraphPanel.show(graphData, label, {
+    onMessage(message) {
+      if (message.command === "setDepth" && typeof message.depth === "number") {
+        currentDepth = message.depth;
+        if (lastFilePath) {
+          showGraph(lastFilePath);
+        }
       }
-    }
-  });
-
-  // Stop live tracking when panel is closed
-  panel.onDispose(() => {
-    isLive = false;
+    },
+    onDispose() {
+      isLive = false;
+    },
   });
 }
 
