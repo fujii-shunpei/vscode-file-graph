@@ -25,6 +25,7 @@ export default function App() {
 
   const graphData = graphPayload?.data ?? null;
   const structure = graphPayload?.structure ?? null;
+  const unresolved = graphPayload?.unresolved ?? null;
   const view = graphPayload?.view ?? "local";
   const groupingEnabled = view === "overview" || showGroups;
 
@@ -206,6 +207,7 @@ export default function App() {
         groupCycleCount={display.grouped ? (structure?.groupCycles.length ?? 0) : 0}
         errorCount={violationCounts.error}
         warningCount={violationCounts.warning}
+        unresolved={unresolved}
       />
     </div>
   );

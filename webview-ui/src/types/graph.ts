@@ -7,6 +7,8 @@ export type {
   GroupDependency,
   RuleViolation,
   StructureAnalysis,
+  UnresolvedImport,
+  UnresolvedImports,
 } from "../../../src/shared/graphTypes";
 
 export const LAYER_COLORS: Record<string, string> = {
