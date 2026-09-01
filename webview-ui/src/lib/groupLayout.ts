@@ -259,10 +259,12 @@ function flatten(
 /**
  * Lay out the group frames and the file nodes inside them.
  *
- * Coordinates follow the React Flow parent/child convention, so the result can be
- * handed to React Flow verbatim: a `GroupBox` with a `parentId` and a file that sits
- * inside a frame carry coordinates relative to the top left corner of that frame,
- * while a top level frame and an ungrouped file carry absolute canvas coordinates.
+ * Coordinates follow the React Flow parent/child convention: a `GroupBox` with a
+ * `parentId` and a file that sits inside a frame carry coordinates relative to the top
+ * left corner of that frame, while a top level frame and an ungrouped file carry
+ * absolute canvas coordinates. It is the coordinates alone that arrive ready to use -
+ * a file position carries no `parentId`, and the caller pairs it with one derived from
+ * the file's group path.
  * `groupBoxes` comes out in pre-order, i.e. a parent always precedes its children,
  * which is the order React Flow requires in its `nodes` array.
  *

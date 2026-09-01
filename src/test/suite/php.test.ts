@@ -2,6 +2,7 @@ import * as assert from "assert";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { clearPathIdCache } from "../../paths/pathId";
 import { PhpResolver } from "../../resolvers/php";
 
 suite("PHP PSR-4 resolution", () => {
@@ -27,6 +28,9 @@ suite("PHP PSR-4 resolution", () => {
   }
 
   setup(() => {
+    // Node ids are canonical paths held in a cache that outlives a suite, so a run
+    // that came before must not be able to answer for a path created here.
+    clearPathIdCache();
     root = fs.realpathSync.native(
       fs.mkdtempSync(path.join(os.tmpdir(), "file-graph-php-psr4-"))
     );
@@ -77,11 +81,31 @@ suite("PHP PSR-4 resolution", () => {
     );
   });
 
-  test("a prefix the nearest composer.json does not declare resolves nowhere", () => {
-    // The file that would satisfy `App\` lies outside the package that owns the entry,
-    // so the entry has no dependency on it. The import is still reported, with no path:
-    // an import that reached nothing has to stay visible, or a project whose paths all
-    // failed to resolve looks exactly like a project with no dependencies.
+  test("the conventional prefixes stand beside the ones a composer.json declares", () => {
+    // A composer.json that declares its own prefixes does not switch the conventional
+    // ones off: a Laravel application writes `App\` nowhere and still means `app/`.
+    composer("composer.json", { "Acme\\": "lib/" });
+    write("app/Models/Estimate.php", "<?php\nnamespace App\\Models;\n");
+    write("lib/Client.php", "<?php\nnamespace Acme;\n");
+
+    assert.deepStrictEqual(
+      resolvedFrom(
+        "app/Http/Controllers/EstimateController.php",
+        `<?php\nuse App\\Models\\Estimate;\nuse Acme\\Client;\n`
+      ),
+      [path.join("app", "Models", "Estimate.php"), path.join("lib", "Client.php")]
+    );
+  });
+
+  test("a class outside the package that owns the file resolves nowhere", () => {
+    // `App\` is mapped here, by the conventional prefixes if by nothing else - but it
+    // is mapped relative to the composer.json that owns the entry, so it names
+    // `src/app/`, and the file below sits in the `app/` of the workspace instead. It
+    // belongs to another package, so the entry has no dependency on it.
+    //
+    // The import is still reported, with no path: an import that reached nothing has
+    // to stay visible, or a project whose paths all failed to resolve looks exactly
+    // like a project with no dependencies.
     composer("src/composer.json", { "Acme\\": "lib/" });
     write("app/Models/Estimate.php", "<?php\nnamespace App\\Models;\n");
 

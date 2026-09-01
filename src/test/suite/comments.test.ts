@@ -3,20 +3,26 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import {
+  CommentSyntax,
   PHP_COMMENT_SYNTAX,
   PYTHON_COMMENT_SYNTAX,
   stripComments,
   TS_COMMENT_SYNTAX,
 } from "../../resolvers/comments";
+import { clearPathIdCache } from "../../paths/pathId";
 import { PhpResolver } from "../../resolvers/php";
 import { PythonResolver } from "../../resolvers/python";
 import { TypeScriptResolver } from "../../resolvers/typescript";
 
 suite("stripComments", () => {
+  function strip(source: string, syntax: CommentSyntax): string {
+    return stripComments(source, syntax).source;
+  }
+
   test("a comment is replaced by spaces, not removed", () => {
     const source = `const a = 1; // gone\nconst b = 2;`;
 
-    const stripped = stripComments(source, TS_COMMENT_SYNTAX);
+    const stripped = strip(source, TS_COMMENT_SYNTAX);
 
     assert.strictEqual(
       stripped,
@@ -28,7 +34,7 @@ suite("stripComments", () => {
   test("a block comment keeps its newlines, so line numbers survive", () => {
     const source = `a\n/* one\ntwo */\nb`;
 
-    const stripped = stripComments(source, TS_COMMENT_SYNTAX);
+    const stripped = strip(source, TS_COMMENT_SYNTAX);
 
     assert.strictEqual(
       stripped,
@@ -39,15 +45,15 @@ suite("stripComments", () => {
 
   test("a comment marker inside a string literal starts no comment", () => {
     assert.strictEqual(
-      stripComments(`const url = "https://example.com/a"; const b = 1;`, TS_COMMENT_SYNTAX),
+      strip(`const url = "https://example.com/a"; const b = 1;`, TS_COMMENT_SYNTAX),
       `const url = "https://example.com/a"; const b = 1;`
     );
     assert.strictEqual(
-      stripComments(`$url = 'http://example.com/a'; $b = 1;`, PHP_COMMENT_SYNTAX),
+      strip(`$url = 'http://example.com/a'; $b = 1;`, PHP_COMMENT_SYNTAX),
       `$url = 'http://example.com/a'; $b = 1;`
     );
     assert.strictEqual(
-      stripComments(`url = "https://example.com/#frag"`, PYTHON_COMMENT_SYNTAX),
+      strip(`url = "https://example.com/#frag"`, PYTHON_COMMENT_SYNTAX),
       `url = "https://example.com/#frag"`
     );
   });
@@ -56,35 +62,108 @@ suite("stripComments", () => {
     const source = `<p>It's here</p>\n// gone`;
 
     assert.strictEqual(
-      stripComments(source, TS_COMMENT_SYNTAX),
+      strip(source, TS_COMMENT_SYNTAX),
       `<p>It's here</p>\n` + " ".repeat("// gone".length)
     );
   });
 
+  test("a template literal spanning lines is blanked whole, and the code after it is not", () => {
+    // Read line by line, the second line onwards would be taken for code: the `/*`
+    // there would open a block comment that nothing closes, blanking the rest of the
+    // file and with it everything written after the literal.
+    const source = "const s = `\n  a /* b\n`;\nconst t = 1;\n";
+
+    const stripped = strip(source, TS_COMMENT_SYNTAX);
+
+    assert.strictEqual(
+      stripped,
+      "const s =  \n" + " ".repeat("  a /* b".length) + "\n ;\nconst t = 1;\n"
+    );
+    assert.strictEqual(stripped.split("\n").length, source.split("\n").length);
+  });
+
+  test("a language with no multiline quote keeps every literal verbatim", () => {
+    // Nothing outside TypeScript declares one, so PHP and Python are untouched by
+    // the blanking above.
+    assert.strictEqual(strip(`$a = '#one';`, PHP_COMMENT_SYNTAX), `$a = '#one';`);
+    assert.strictEqual(strip(`a = "#one"`, PYTHON_COMMENT_SYNTAX), `a = "#one"`);
+  });
+
   test("PHP treats a hash as a comment but an attribute as code", () => {
     assert.strictEqual(
-      stripComments(`$a = 1; # gone`, PHP_COMMENT_SYNTAX),
+      strip(`$a = 1; # gone`, PHP_COMMENT_SYNTAX),
       `$a = 1; ` + " ".repeat("# gone".length)
     );
-    assert.strictEqual(
-      stripComments(`#[Route('/home')]`, PHP_COMMENT_SYNTAX),
-      `#[Route('/home')]`
-    );
+    assert.strictEqual(strip(`#[Route('/home')]`, PHP_COMMENT_SYNTAX), `#[Route('/home')]`);
   });
 
   test("Python leaves a docstring in place", () => {
     const source = `"""\nModule doc\n"""\nimport real\n`;
 
-    assert.strictEqual(stripComments(source, PYTHON_COMMENT_SYNTAX), source);
+    assert.strictEqual(strip(source, PYTHON_COMMENT_SYNTAX), source);
   });
 
-  test("a hash inside a docstring is blanked, and no dependency is lost", () => {
-    // The lines of a docstring are read as code, so a `#` there does start a
-    // comment. A docstring holds prose, never an executed import, so the blanking
-    // can only remove text that was never a dependency.
+  test("a hash inside a docstring spanning lines is blanked, and no dependency is lost", () => {
+    // The third quote opens a literal that ends at the first newline, so the lines
+    // after it are read as code and a `#` there does start a comment. A docstring
+    // holds prose, never an executed import, so the blanking can only remove text
+    // that was never a dependency.
     assert.strictEqual(
-      stripComments(`"""\nDoc # text\n"""`, PYTHON_COMMENT_SYNTAX),
+      strip(`"""\nDoc # text\n"""`, PYTHON_COMMENT_SYNTAX),
       `"""\nDoc ` + " ".repeat("# text".length) + `\n"""`
+    );
+  });
+
+  test("a hash inside a single line docstring is kept", () => {
+    // The opposite of the case above, and for the same reason: the third quote opens
+    // a literal that here reaches the closing quote, so the whole text is one string
+    // and nothing in it is read as code. Prose either way, so nothing is at stake.
+    assert.strictEqual(strip(`"""Doc # text"""`, PYTHON_COMMENT_SYNTAX), `"""Doc # text"""`);
+    assert.strictEqual(strip(`'''Doc # text'''`, PYTHON_COMMENT_SYNTAX), `'''Doc # text'''`);
+  });
+});
+
+suite("stripComments reports what it never found the end of", () => {
+  test("a file read whole reports nothing", () => {
+    const source = `/* one */\nconst s = "two";\nimport a from './a';\n`;
+
+    assert.deepStrictEqual(stripComments(source, TS_COMMENT_SYNTAX).unterminated, []);
+  });
+
+  test("a string closed on the last character of the file is not unterminated", () => {
+    // The literal ends exactly where the file does, which is not the same as running
+    // off the end of it.
+    assert.deepStrictEqual(
+      stripComments(`const a = "x"`, TS_COMMENT_SYNTAX).unterminated,
+      []
+    );
+  });
+
+  test("an unclosed block comment is reported, along with the import it swallowed", () => {
+    const source = `import a from './a';\n/* never closed\nimport b from './b';\n`;
+
+    const stripped = stripComments(source, TS_COMMENT_SYNTAX);
+
+    assert.deepStrictEqual(stripped.unterminated, [
+      { kind: "block-comment", offset: source.indexOf("/*") },
+    ]);
+    assert.ok(!stripped.source.includes("./b"), "the import after it was blanked");
+  });
+
+  test("an unclosed literal spanning lines is reported", () => {
+    const source = "const s = `\n  never closed\n";
+
+    assert.deepStrictEqual(stripComments(source, TS_COMMENT_SYNTAX).unterminated, [
+      { kind: "string", offset: source.indexOf("`") },
+    ]);
+  });
+
+  test("a literal ended by a newline is not reported", () => {
+    // Accepted and bounded: a stray apostrophe costs the rest of its line, no more,
+    // so there is nothing to warn about.
+    assert.deepStrictEqual(
+      stripComments(`<p>It's here</p>\nconst a = 1;\n`, TS_COMMENT_SYNTAX).unterminated,
+      []
     );
   });
 });
@@ -148,10 +227,41 @@ suite("TypeScript imports are read past comments", () => {
     // keeps its target inside one.
     assert.deepStrictEqual(rawImports(`const s = "import x from './ghost'";\n`), ["./ghost"]);
   });
+
+  test("an import written inside a template literal is not reported", () => {
+    // The counterpart of the case above, and the reason the two differ: a specifier
+    // is spelled between `'` or `"`, never between backticks, so a template literal
+    // can be blanked without losing one. A code sample or a fixture written in one
+    // is prose about a file, not a dependency on it.
+    assert.deepStrictEqual(rawImports('const doc = `\n  import { fake } from "./fake";\n`;\n'), []);
+  });
+
+  test("an unclosed block comment inside a template literal deletes no import", () => {
+    // Read line by line, the `/*` inside the literal would open a comment that
+    // nothing closes, blanking every import after it.
+    assert.deepStrictEqual(
+      rawImports("const s = `\n  a /* b\n`;\nimport a from './a';\n"),
+      ["./a"]
+    );
+  });
+
+  test("a dynamic import inside an interpolation is not seen", () => {
+    // Accepted, not a bug: an interpolation is code, but it is blanked along with
+    // the literal that holds it. The price of blanking template literals, paid
+    // because writing an import there is rare and a phantom edge costs more than a
+    // missing one.
+    assert.deepStrictEqual(rawImports('const x = `${(await import("./real")).x}`;\n'), []);
+  });
 });
 
 suite("PHP imports are read past comments", () => {
   let root: string;
+
+  setup(() => {
+    // Node ids are canonical paths held in a cache that outlives a suite, so a run
+    // that came before must not be able to answer for a path created here.
+    clearPathIdCache();
+  });
 
   suiteSetup(() => {
     root = fs.realpathSync.native(

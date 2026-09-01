@@ -1,7 +1,7 @@
 import { type CSSProperties, type FC, memo } from "react";
 import { Handle, Position } from "@xyflow/react";
 import { edgeColorFor } from "../lib/edgeStyle";
-import { type PinInfo } from "../lib/nodeIO";
+import { type PinInfo, inHandleId, outHandleId } from "../lib/nodeIO";
 
 export interface NodePinsProps {
   incoming: PinInfo[];
@@ -40,8 +40,8 @@ export const NodePins: FC<NodePinsProps> = memo(({ incoming, outgoing }) => (
   <>
     {incoming.map((pin, index) => (
       <Handle
-        key={pin.handleId}
-        id={pin.handleId}
+        key={pin.peerId}
+        id={inHandleId(pin.peerId)}
         type="target"
         position={Position.Left}
         isConnectable={false}
@@ -52,8 +52,8 @@ export const NodePins: FC<NodePinsProps> = memo(({ incoming, outgoing }) => (
     ))}
     {outgoing.map((pin, index) => (
       <Handle
-        key={pin.handleId}
-        id={pin.handleId}
+        key={pin.peerId}
+        id={outHandleId(pin.peerId)}
         type="source"
         position={Position.Right}
         isConnectable={false}

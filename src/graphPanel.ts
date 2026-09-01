@@ -1,10 +1,5 @@
 import * as vscode from "vscode";
-import { GraphData } from "./analyzer";
-import type {
-  GraphPayload,
-  StructureAnalysis,
-  UnresolvedImports,
-} from "./shared/graphTypes";
+import type { GraphPayload } from "./shared/graphTypes";
 
 export interface PanelCallbacks {
   onMessage?: (message: any) => void;
@@ -38,13 +33,21 @@ export class GraphPanel {
     );
   }
 
+  /**
+   * Reveal the panel and draw the payload in it.
+   *
+   * The payload arrives whole rather than as one argument per field: every part of
+   * it is something the host gathered and the webview has to be told, so a new one
+   * would otherwise become another positional argument here, in `update` and at
+   * both call sites - four places to add it and one to forget.
+   *
+   * @param focusLabel What the graph is centred on, for the panel title. Not part of
+   * the payload: it is read by the window chrome, which the webview never sees.
+   */
   static show(
     extensionUri: vscode.Uri,
-    graphData: GraphData,
-    structure: StructureAnalysis,
-    unresolved: UnresolvedImports,
+    payload: GraphPayload,
     focusLabel: string,
-    view: GraphPayload["view"],
     callbacks?: PanelCallbacks,
   ): GraphPanel {
     const column = vscode.ViewColumn.Beside;
@@ -52,13 +55,7 @@ export class GraphPanel {
     if (GraphPanel.currentPanel) {
       GraphPanel.currentPanel.panel.reveal(column);
       if (callbacks) GraphPanel.currentPanel.callbacks = callbacks;
-      GraphPanel.currentPanel.update(
-        graphData,
-        structure,
-        unresolved,
-        focusLabel,
-        view,
-      );
+      GraphPanel.currentPanel.update(payload, focusLabel);
       return GraphPanel.currentPanel;
     }
 
@@ -77,25 +74,12 @@ export class GraphPanel {
 
     GraphPanel.currentPanel = new GraphPanel(panel, extensionUri);
     if (callbacks) GraphPanel.currentPanel.callbacks = callbacks;
-    GraphPanel.currentPanel.update(
-      graphData,
-      structure,
-      unresolved,
-      focusLabel,
-      view,
-    );
+    GraphPanel.currentPanel.update(payload, focusLabel);
     return GraphPanel.currentPanel;
   }
 
-  private update(
-    graphData: GraphData,
-    structure: StructureAnalysis,
-    unresolved: UnresolvedImports,
-    focusLabel: string,
-    view: GraphPayload["view"],
-  ): void {
+  private update(payload: GraphPayload, focusLabel: string): void {
     this.panel.title = `File Graph: ${focusLabel}`;
-    const payload: GraphPayload = { view, data: graphData, structure, unresolved };
 
     if (!this.initialized) {
       this.panel.webview.html = this.getHtml(payload);

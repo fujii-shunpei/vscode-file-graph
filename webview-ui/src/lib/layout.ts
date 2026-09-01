@@ -12,8 +12,9 @@ const ROW_GAP_Y = LAYER_GAP_Y - NODE_HEIGHT;
  * Nodes a single row may hold before the layer wraps onto another row.
  *
  * Without it a populous layer becomes one row as wide as the whole layer, which the
- * overview turns into a frame tens of thousands of pixels wide that no zoom level can
- * fit. Ordinary graphs stay below the cap and keep their previous single-row shape.
+ * overview turns into a frame tens of thousands of pixels wide - too wide for any
+ * zoom level to fit, because the canvas in `FileGraph.tsx` stops zooming out at
+ * `minZoom={0.1}`. A layer that stays below the cap still comes out as a single row.
  */
 const MAX_ROW_NODES = 24;
 

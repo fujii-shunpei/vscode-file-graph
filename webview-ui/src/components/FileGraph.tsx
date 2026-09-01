@@ -112,7 +112,8 @@ type FlowNode = FileFlowNode | GroupFlowNode;
  * What the hover patch needs to restyle a wire without rebuilding it: the accent
  * decides the resting stroke, and the flag says whether the wire already wears the
  * highlighted one. Reading the flag rather than the stroke keeps the two apart even
- * though an accented wire at rest is as thick as a plain wire highlighted.
+ * though a cycle wire at rest is as thick as a plain wire highlighted - both 2px. The
+ * error and warning accents rest at 3px and so cannot be confused with either.
  */
 interface EdgeData extends Record<string, unknown> {
   accent: EdgeAccent | null;

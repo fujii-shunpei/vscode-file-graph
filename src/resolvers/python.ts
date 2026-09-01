@@ -15,7 +15,8 @@ export class PythonResolver implements LanguageResolver {
   ): ResolvedImport[] {
     const imports: ResolvedImport[] = [];
     const seen = new Set<string>();
-    const source = stripComments(content, PYTHON_COMMENT_SYNTAX);
+    // `unterminated` is dropped: nothing reports a partly read file to the user yet.
+    const { source } = stripComments(content, PYTHON_COMMENT_SYNTAX);
 
     const addImport = (raw: string, resolved: string | null, type: string) => {
       if (resolved && seen.has(resolved)) return;

@@ -7,6 +7,8 @@ export type {
   GroupDependency,
   RuleViolation,
   StructureAnalysis,
+  UnreadablePath,
+  UnreadablePaths,
   UnresolvedImport,
   UnresolvedImports,
 } from "../../../src/shared/graphTypes";

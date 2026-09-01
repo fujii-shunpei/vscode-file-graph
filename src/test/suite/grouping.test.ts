@@ -54,6 +54,91 @@ suite("globToRegExp", () => {
     assert.strictEqual(regex.test("lib/src/App.ts"), false);
     assert.strictEqual(regex.test("src/App.ts.map"), false);
   });
+
+  // 65 characters holding 32 separators. Every separator is another place a
+  // `**` group can try to split the path, so a path shaped like this is what a
+  // run of them costs the most to reject.
+  const DEEPLY_NESTED_PATH =
+    "a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/a/b/c/d/e/f/g";
+
+  test("a long run of double asterisks is rejected in reasonable time", () => {
+    const regex = globToRegExp("**/".repeat(12) + "nothing.ts");
+
+    const startedAt = Date.now();
+    assert.strictEqual(regex.test(DEEPLY_NESTED_PATH), false);
+    const elapsed = Date.now() - startedAt;
+
+    // One group per `**` made this single call take over 30 seconds, and the
+    // extension runs every rule against every node. The budget is orders of
+    // magnitude above what the folded pattern needs on any machine and orders of
+    // magnitude below what the unfolded one ever managed, so it can only fail if
+    // the exponential comes back.
+    assert.ok(elapsed < 1000, `rejecting the path took ${elapsed}ms`);
+  });
+
+  test("a run of double asterisks matches what a single one matches", () => {
+    const folded = globToRegExp("**/**/**/x.ts");
+    const single = globToRegExp("**/x.ts");
+
+    for (const candidate of [
+      "x.ts",
+      "src/x.ts",
+      "src/domain/user/x.ts",
+      "src/x.tsx",
+      "src/y.ts",
+      "xx.ts",
+      "",
+    ]) {
+      assert.strictEqual(
+        folded.test(candidate),
+        single.test(candidate),
+        `disagreed on ${JSON.stringify(candidate)}`
+      );
+    }
+    assert.strictEqual(folded.test("src/domain/user/x.ts"), true);
+  });
+
+  test("a bare double asterisk in a run keeps the run free of separators", () => {
+    const folded = globToRegExp("src/**/**");
+    const single = globToRegExp("src/**");
+
+    for (const candidate of [
+      "src/User.ts",
+      "src/domain/user/User.ts",
+      "src/",
+      "srcUser.ts",
+      "lib/src/User.ts",
+    ]) {
+      assert.strictEqual(
+        folded.test(candidate),
+        single.test(candidate),
+        `disagreed on ${JSON.stringify(candidate)}`
+      );
+    }
+    assert.strictEqual(folded.test("src/domain/user/User.ts"), true);
+    assert.strictEqual(folded.test("lib/src/User.ts"), false);
+  });
+
+  test("a run of double asterisks mixed with a single one keeps its meaning", () => {
+    const folded = globToRegExp("src/**/**/*.ts");
+    const single = globToRegExp("src/**/*.ts");
+
+    for (const candidate of [
+      "src/App.ts",
+      "src/domain/App.ts",
+      "src/domain/user/App.ts",
+      "src/App.tsx",
+      "lib/App.ts",
+    ]) {
+      assert.strictEqual(
+        folded.test(candidate),
+        single.test(candidate),
+        `disagreed on ${JSON.stringify(candidate)}`
+      );
+    }
+    assert.strictEqual(folded.test("src/domain/user/App.ts"), true);
+    assert.strictEqual(folded.test("src/App.tsx"), false);
+  });
 });
 
 suite("resolveGroupPath", () => {

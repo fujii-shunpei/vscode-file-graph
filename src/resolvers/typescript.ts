@@ -5,16 +5,120 @@ import { stripComments, TS_COMMENT_SYNTAX } from "./comments";
 import { toNodeId } from "../paths/pathId";
 
 interface TsConfig {
-  paths: Record<string, string[]>;
+  /**
+   * The directory the config was found in.
+   *
+   * `baseUrl` and every target in `paths` are written relative to it, so it and not
+   * the workspace root is what an alias is resolved against.
+   */
+  base: string;
   baseUrl: string;
   compiledPaths: { regex: RegExp; targets: string[] }[];
+}
+
+/** Where a JSON string literal starting at `start` ends, escapes included. */
+function endOfJsonString(source: string, start: number): number {
+  let i = start + 1;
+  while (i < source.length) {
+    if (source[i] === "\\") {
+      i += 2;
+      continue;
+    }
+    if (source[i] === '"') return i + 1;
+    i++;
+  }
+  return source.length;
+}
+
+/**
+ * Turn the JSONC a tsconfig is written in into the JSON `JSON.parse` accepts.
+ *
+ * TypeScript reads a tsconfig as JSONC, where a comment and a comma before a closing
+ * brace are both legal; `JSON.parse` refuses both. Real projects carry both, so a
+ * parser that only handles strict JSON reports the common case as a project without
+ * path aliases and moves every aliased import out of the graph.
+ *
+ * String literals are skipped whole, for the reason the resolvers skip them in source:
+ * a `//` inside one belongs to a URL or a path and a comma inside one is text. Both
+ * comments and the commas are blanked rather than removed, so that every other offset
+ * stays where it was and a parse error still points at the place in the file the
+ * reader is looking at.
+ */
+function jsoncToJson(raw: string): string {
+  const { source } = stripComments(raw, TS_COMMENT_SYNTAX);
+  const out = source.split("");
+
+  // Index of the last comma seen outside a string with only whitespace since; -1 when
+  // something else has been read, which is what makes the comma a separator and not a
+  // trailing one.
+  let pendingComma = -1;
+  let i = 0;
+  while (i < source.length) {
+    const char = source[i];
+    if (char === '"') {
+      i = endOfJsonString(source, i);
+      pendingComma = -1;
+      continue;
+    }
+    if (char === " " || char === "\t" || char === "\r" || char === "\n") {
+      i++;
+      continue;
+    }
+    if (char === ",") {
+      pendingComma = i;
+      i++;
+      continue;
+    }
+    if ((char === "}" || char === "]") && pendingComma !== -1) {
+      out[pendingComma] = " ";
+    }
+    pendingComma = -1;
+    i++;
+  }
+
+  return out.join("");
+}
+
+/**
+ * Read the alias rules out of a tsconfig found at `configPath`.
+ *
+ * `extends` is not followed: a config that keeps its `paths` in a base config resolves
+ * no aliases here, and is read as a config declaring none.
+ */
+function compileTsConfig(raw: string, configPath: string, base: string): TsConfig {
+  let parsed: {
+    compilerOptions?: { baseUrl?: string; paths?: Record<string, string[]> };
+  };
+  try {
+    parsed = JSON.parse(jsoncToJson(raw));
+  } catch (e) {
+    // A config that cannot be parsed is not a config without aliases. Answering with
+    // an empty one is silent in exactly the wrong place: every `@/...` import then
+    // resolves nowhere and is counted beside `react` as something outside the graph,
+    // with nothing anywhere saying the config was the reason.
+    throw new Error(`Cannot parse ${configPath}`, { cause: e });
+  }
+
+  const compilerOptions = parsed.compilerOptions ?? {};
+  const paths = compilerOptions.paths ?? {};
+
+  return {
+    base,
+    baseUrl: compilerOptions.baseUrl ?? ".",
+    // Pre-compile path patterns to regexes
+    compiledPaths: Object.entries(paths).map(([pattern, targets]) => ({
+      regex: new RegExp("^" + pattern.replace(/\*/g, "(.*)") + "$"),
+      targets,
+    })),
+  };
 }
 
 export class TypeScriptResolver implements LanguageResolver {
   languageIds = ["typescript", "typescriptreact", "javascript", "javascriptreact"];
   fileExtensions = [".ts", ".tsx", ".js", ".jsx"];
 
-  private tsConfigCache: TsConfig | null = null;
+  /** Keyed by the directory of the file the config was looked up for, as in the PHP resolver. */
+  private tsConfigCache = new Map<string, TsConfig>();
 
   resolveImports(
     content: string,
@@ -22,7 +126,8 @@ export class TypeScriptResolver implements LanguageResolver {
     workspaceRoot: string
   ): ResolvedImport[] {
     const imports: ResolvedImport[] = [];
-    const source = stripComments(content, TS_COMMENT_SYNTAX);
+    // `unterminated` is dropped: nothing reports a partly read file to the user yet.
+    const { source } = stripComments(content, TS_COMMENT_SYNTAX);
 
     // ES module imports: import ... from '...'
     const importFromRegex = /\bimport\s+(?:[\w{}\s,*]+\s+from\s+)?['"]([^'"]+)['"]/g;
@@ -61,7 +166,7 @@ export class TypeScriptResolver implements LanguageResolver {
   }
 
   clearCache(): void {
-    this.tsConfigCache = null;
+    this.tsConfigCache.clear();
   }
 
   private resolveSpecifier(
@@ -77,16 +182,23 @@ export class TypeScriptResolver implements LanguageResolver {
     }
 
     // Non-relative: try tsconfig paths alias first
-    const aliasResult = this.resolveAlias(specifier, workspaceRoot);
+    const aliasResult = this.resolveAlias(specifier, currentFile, workspaceRoot);
     if (aliasResult) return aliasResult;
 
-    // Fallback: @/ -> src/ (common convention even without tsconfig paths)
+    // Fallback: @/ -> src/ (common convention even without tsconfig paths).
+    // Tried from the directory the file's own config sits in before the workspace
+    // root, because `src/` means the one belonging to this project: in a repository
+    // that keeps its frontend under `frontend/`, the `src/` at the root is another
+    // package's or nothing at all.
     if (specifier.startsWith("@/")) {
       const withoutAlias = specifier.slice(2);
-      const candidates = [
+      const projectRoot = this.tsConfigFor(currentFile, workspaceRoot).base;
+      const candidates = new Set([
+        path.join(projectRoot, "src", withoutAlias),
+        path.join(projectRoot, withoutAlias),
         path.join(workspaceRoot, "src", withoutAlias),
         path.join(workspaceRoot, withoutAlias),
-      ];
+      ]);
       for (const base of candidates) {
         const resolved = this.tryResolveFile(base);
         if (resolved) return resolved;
@@ -123,17 +235,17 @@ export class TypeScriptResolver implements LanguageResolver {
 
   private resolveAlias(
     specifier: string,
+    currentFile: string,
     workspaceRoot: string
   ): string | null {
-    const config = this.loadTsConfig(workspaceRoot);
-    if (!config) return null;
+    const config = this.tsConfigFor(currentFile, workspaceRoot);
 
     for (const { regex, targets } of config.compiledPaths) {
       const match = specifier.match(regex);
       if (match) {
         for (const target of targets) {
           const resolved = target.replace(/\*/g, match[1] || "");
-          const fullPath = path.resolve(workspaceRoot, config.baseUrl, resolved);
+          const fullPath = path.resolve(config.base, config.baseUrl, resolved);
           const result = this.tryResolveFile(fullPath);
           if (result) return result;
         }
@@ -143,40 +255,62 @@ export class TypeScriptResolver implements LanguageResolver {
     return null;
   }
 
-  private loadTsConfig(workspaceRoot: string): TsConfig | null {
-    if (this.tsConfigCache !== null) {
-      return this.tsConfigCache;
+  private static readonly CONFIG_NAMES = ["tsconfig.json", "jsconfig.json"];
+
+  /**
+   * The alias rules that apply to a file, and the directory their paths are relative to.
+   *
+   * TypeScript reads the nearest config at or above a file, and both `baseUrl` and the
+   * targets in `paths` are written relative to the directory holding it. The workspace
+   * root is therefore the wrong anchor wherever the project does not sit at it - a
+   * frontend under `frontend/`, one package of a monorepo - and a root with no config
+   * at all leaves every `@/...` import resolving nowhere, counted beside `react` as
+   * something that lives outside the graph.
+   *
+   * Bounded by the workspace for the reason the PHP resolver bounds its own search: a
+   * project that declares no aliases must not be given the ones belonging to whatever
+   * unrelated package sits above the directory the user opened.
+   */
+  private tsConfigFor(filePath: string, workspaceRoot: string): TsConfig {
+    const startDir = path.dirname(filePath);
+    const cached = this.tsConfigCache.get(startDir);
+    if (cached) return cached;
+
+    const root = path.resolve(workspaceRoot);
+    let found: TsConfig | null = null;
+    let dir = startDir;
+    while (dir.startsWith(root)) {
+      found = this.loadTsConfig(dir);
+      if (found) break;
+      const parent = path.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
     }
 
-    const configNames = ["tsconfig.json", "jsconfig.json"];
+    // No config anywhere above the file: no aliases, and the root is as good an
+    // anchor as any for the `@/` convention that needs one regardless.
+    const config = found ?? { base: root, baseUrl: ".", compiledPaths: [] };
+    this.tsConfigCache.set(startDir, config);
+    return config;
+  }
 
-    for (const configName of configNames) {
-      const configPath = path.join(workspaceRoot, configName);
+  /** The config written in this exact directory, or null when there is none. */
+  private loadTsConfig(dir: string): TsConfig | null {
+    for (const configName of TypeScriptResolver.CONFIG_NAMES) {
+      const configPath = path.join(dir, configName);
+      let raw: string;
       try {
-        const raw = fs.readFileSync(configPath, "utf-8");
-        const cleaned = raw.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
-        const config = JSON.parse(cleaned);
-        const compilerOptions = config.compilerOptions || {};
-        const paths: Record<string, string[]> = compilerOptions.paths || {};
-
-        // Pre-compile path patterns to regexes
-        const compiledPaths = Object.entries(paths).map(([pattern, targets]) => ({
-          regex: new RegExp("^" + pattern.replace(/\*/g, "(.*)") + "$"),
-          targets: targets as string[],
-        }));
-
-        this.tsConfigCache = {
-          paths,
-          baseUrl: compilerOptions.baseUrl || ".",
-          compiledPaths,
-        };
-        return this.tsConfigCache;
-      } catch {
-        continue;
+        raw = fs.readFileSync(configPath, "utf-8");
+      } catch (e) {
+        // ENOENT is the only answer that means "keep looking further up". A config
+        // that exists and will not open - EACCES on a container mount, a directory
+        // named tsconfig.json - is a fact about this machine, and reporting it as a
+        // project without aliases would hide it behind a graph that looks complete.
+        if ((e as NodeJS.ErrnoException | null)?.code === "ENOENT") continue;
+        throw e;
       }
+      return compileTsConfig(raw, configPath, dir);
     }
-
-    this.tsConfigCache = { paths: {}, baseUrl: ".", compiledPaths: [] };
-    return this.tsConfigCache;
+    return null;
   }
 }

@@ -101,6 +101,10 @@ export function activate(context: vscode.ExtensionContext) {
     ) {
       return;
     }
+    // Before the panel check: the settings that hold a reported fault have just
+    // been edited, so the fault is worth stating again whether or not the edit
+    // is followed by a redraw.
+    reportedConfigWarnings.clear();
     if (!GraphPanel.currentPanel) return;
 
     if (currentView === "overview") {
@@ -120,6 +124,20 @@ export function activate(context: vscode.ExtensionContext) {
   );
 }
 
+// The settings are read again for every redraw, and a redraw follows every
+// editor switch while live tracking is on, so a fault reported per read stacks
+// one toast per switch. The fault belongs to the settings, not to the redraw
+// that happened to read them, so each message is shown once and the record is
+// dropped when the settings that could hold the fault change.
+const reportedConfigWarnings = new Set<string>();
+
+/** Report a settings fault unless the same one has already been reported. */
+function reportConfigWarning(message: string): void {
+  if (reportedConfigWarnings.has(message)) return;
+  reportedConfigWarnings.add(message);
+  vscode.window.showWarningMessage(message);
+}
+
 /**
  * Keep the well formed entries of `fileGraph.groups.rules` and report the rest.
  *
@@ -130,14 +148,14 @@ export function activate(context: vscode.ExtensionContext) {
  */
 function validateRules(raw: unknown): GroupRule[] {
   if (!Array.isArray(raw)) {
-    vscode.window.showWarningMessage(
+    reportConfigWarning(
       "fileGraph.groups.rules must be an array. The setting was ignored."
     );
     return [];
   }
 
   const rules: GroupRule[] = [];
-  let rejected = 0;
+  const rejected: unknown[] = [];
   for (const entry of raw) {
     const rule = entry as Partial<GroupRule> | null;
     if (
@@ -148,16 +166,53 @@ function validateRules(raw: unknown): GroupRule[] {
     ) {
       rules.push({ pattern: rule.pattern, name: rule.name });
     } else {
-      rejected++;
+      rejected.push(entry);
     }
   }
 
-  if (rejected > 0) {
-    vscode.window.showWarningMessage(
-      `fileGraph.groups.rules: ${rejected} rule(s) without a string "pattern" and "name" were ignored.`
+  // The offending entry is named, because a count alone leaves the reader to
+  // search a list that can be long for the one that was dropped.
+  if (rejected.length > 0) {
+    reportConfigWarning(
+      `fileGraph.groups.rules: ${rejected.length} rule(s) without a string "pattern" and "name" were ignored, starting with ${JSON.stringify(rejected[0])}.`
     );
   }
   return rules;
+}
+
+// The range `fileGraph.groups.autoDepth` is declared with in `contributes`, kept
+// beside the check that has to hold it: the schema in package.json is the copy
+// the settings editor reads, and this one is the copy that decides.
+const AUTO_DEPTH_DEFAULT = 2;
+const AUTO_DEPTH_MAX = 6;
+
+/**
+ * Keep `fileGraph.groups.autoDepth` when it reads as a depth and report it otherwise.
+ *
+ * Written to the same contract as `validateRules`: the schema in `contributes`
+ * cannot stop a hand written settings.json, so the value arrives unchecked.
+ *
+ * An unchecked one is worse than merely wrong. `attachGroups` feeds it to
+ * `Math.min`, where a negative, a `null` or an unparsable value yields an empty
+ * group path for every node. The graph then has no groups, the forbidden rules
+ * are read against groups that are not there and match nothing, and the result
+ * reads as a graph with no violations rather than as a graph that was never
+ * checked. Falling back to the default keeps the grouping the user would
+ * recognise, and the report keeps the reason for it visible.
+ */
+function validateAutoDepth(raw: unknown): number {
+  if (
+    typeof raw !== "number" ||
+    !Number.isInteger(raw) ||
+    raw < 0 ||
+    raw > AUTO_DEPTH_MAX
+  ) {
+    reportConfigWarning(
+      `fileGraph.groups.autoDepth must be a whole number between 0 and ${AUTO_DEPTH_MAX}. ${JSON.stringify(raw)} was ignored and ${AUTO_DEPTH_DEFAULT} used instead.`
+    );
+    return AUTO_DEPTH_DEFAULT;
+  }
+  return raw;
 }
 
 /**
@@ -171,7 +226,9 @@ function readGroupConfig(scope: vscode.Uri): GroupConfig {
   const config = vscode.workspace.getConfiguration("fileGraph", scope);
   return {
     rules: validateRules(config.get<unknown>("groups.rules", [])),
-    autoDepth: config.get<number>("groups.autoDepth", 2),
+    autoDepth: validateAutoDepth(
+      config.get<unknown>("groups.autoDepth", AUTO_DEPTH_DEFAULT)
+    ),
   };
 }
 
@@ -189,14 +246,14 @@ function readGroupConfig(scope: vscode.Uri): GroupConfig {
  */
 function validateForbiddenRules(raw: unknown): DependencyRule[] {
   if (!Array.isArray(raw)) {
-    vscode.window.showWarningMessage(
+    reportConfigWarning(
       "fileGraph.rules.forbidden must be an array. The setting was ignored."
     );
     return [];
   }
 
   const rules: DependencyRule[] = [];
-  let rejected = 0;
+  const rejected: unknown[] = [];
   for (const entry of raw) {
     const rule = entry as Partial<DependencyRule> | null;
     if (
@@ -209,7 +266,7 @@ function validateForbiddenRules(raw: unknown): DependencyRule[] {
         rule.severity !== "error" &&
         rule.severity !== "warning")
     ) {
-      rejected++;
+      rejected.push(entry);
       continue;
     }
 
@@ -222,9 +279,9 @@ function validateForbiddenRules(raw: unknown): DependencyRule[] {
     });
   }
 
-  if (rejected > 0) {
-    vscode.window.showWarningMessage(
-      `fileGraph.rules.forbidden: ${rejected} rule(s) that are not { from: string, to: string, name?: string, severity?: "error" | "warning" } were ignored.`
+  if (rejected.length > 0) {
+    reportConfigWarning(
+      `fileGraph.rules.forbidden: ${rejected.length} rule(s) that are not { from: string, to: string, name?: string, severity?: "error" | "warning" } were ignored, starting with ${JSON.stringify(rejected[0])}.`
     );
   }
   return rules;
@@ -270,24 +327,28 @@ function showGraph(filePath: string): void {
 
   GraphPanel.show(
     extensionUri,
-    graphData,
-    structure,
-    result.unresolved,
-    label,
-    "local",
     {
-    onMessage(message) {
-      if (message.command === "setDepth" && typeof message.depth === "number") {
-        currentDepth = message.depth;
-        if (lastFilePath) {
-          showGraph(lastFilePath);
+      view: "local",
+      data: graphData,
+      structure,
+      unresolved: result.unresolved,
+      unreadable: result.unreadable,
+    },
+    label,
+    {
+      onMessage(message) {
+        if (message.command === "setDepth" && typeof message.depth === "number") {
+          currentDepth = message.depth;
+          if (lastFilePath) {
+            showGraph(lastFilePath);
+          }
         }
-      }
-    },
-    onDispose() {
-      isLive = false;
-    },
-  });
+      },
+      onDispose() {
+        isLive = false;
+      },
+    }
+  );
 }
 
 function showOverview(): void {
@@ -316,11 +377,14 @@ function showOverview(): void {
   // file, so depth changes and live tracking must not fire here.
   GraphPanel.show(
     extensionUri,
-    graphData,
-    structure,
-    result.unresolved,
+    {
+      view: "overview",
+      data: graphData,
+      structure,
+      unresolved: result.unresolved,
+      unreadable: result.unreadable,
+    },
     "Overview",
-    "overview",
     {}
   );
 }

@@ -15,7 +15,8 @@ export class PhpResolver implements LanguageResolver {
   ): ResolvedImport[] {
     const imports: ResolvedImport[] = [];
     const seen = new Set<string>();
-    const source = stripComments(content, PHP_COMMENT_SYNTAX);
+    // `unterminated` is dropped: nothing reports a partly read file to the user yet.
+    const { source } = stripComments(content, PHP_COMMENT_SYNTAX);
 
     /**
      * Report an import once, whether or not it reached a file.

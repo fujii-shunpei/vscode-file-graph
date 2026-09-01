@@ -195,10 +195,15 @@ suite("analyzeStructure violations", () => {
   });
 
   test("the rules reach the analysis", () => {
-    assert.deepStrictEqual(
-      analyzeStructure(data, [rule()]).violations,
-      findViolations(data, [rule()])
-    );
-    assert.strictEqual(analyzeStructure(data, [rule()]).violations.length, 1);
+    assert.deepStrictEqual(analyzeStructure(data, [rule()]).violations, [
+      {
+        ruleName: "forbidden",
+        severity: "error",
+        source: "a",
+        target: "b",
+        fromGroup: "X",
+        toGroup: "Y",
+      },
+    ]);
   });
 });

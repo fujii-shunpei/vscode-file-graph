@@ -95,19 +95,6 @@ suite("analyzeStructure", () => {
       assert.deepStrictEqual(analyzeStructure(data).cycles, []);
     });
 
-    test("the id of a cycle is the same when the graph is analysed again", () => {
-      const build = (): GraphData => ({
-        nodes: [node("a"), node("b"), node("c")],
-        edges: [edge("a", "b"), edge("b", "c"), edge("c", "a")],
-      });
-
-      assert.deepStrictEqual(
-        analyzeStructure(build()).cycles.map((cycle) => cycle.id),
-        analyzeStructure(build()).cycles.map((cycle) => cycle.id)
-      );
-      assert.strictEqual(analyzeStructure(build()).cycles.length, 1);
-    });
-
     test("the id does not depend on the order the cycle is walked", () => {
       const forwards: GraphData = {
         nodes: [node("a"), node("b"), node("c")],

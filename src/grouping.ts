@@ -28,14 +28,26 @@ export function globToRegExp(glob: string): RegExp {
     const char = glob[i];
 
     if (char === "*" && glob[i + 1] === "*") {
-      // `**/` also has to match zero directories, so the slash is optional too.
-      if (glob[i + 2] === "/") {
-        source += "(?:.*/)?";
-        i += 3;
-      } else {
-        source += ".*";
-        i += 2;
+      // Adjacent `**` name the same set of paths as one `**`, but emitting one
+      // group each hands the engine that many overlapping ways to split the same
+      // separators, and the cost of *rejecting* a path grows exponentially with
+      // the count: on a deep path six of them take ~25ms and nine take ~3s. Every
+      // rule is tested against every node, so a pattern as ordinary as
+      // `src/**/**/*.ts` would stall the extension host with no error and no
+      // progress to explain it. Folding the run keeps that cost flat.
+      let boundedToDirectories = true;
+      while (glob[i] === "*" && glob[i + 1] === "*") {
+        if (glob[i + 2] === "/") {
+          i += 3;
+        } else {
+          // A bare `**` is not tied to a separator, and one of them anywhere in
+          // the run lets the whole run start and end mid-segment.
+          boundedToDirectories = false;
+          i += 2;
+        }
       }
+      // `**/` also has to match zero directories, so the slash is optional too.
+      source += boundedToDirectories ? "(?:.*/)?" : ".*";
     } else if (char === "*") {
       source += "[^/]*";
       i += 1;
@@ -75,7 +87,11 @@ function resolveWithCompiledRules(
 
   // A file resolved outside the workspace has no place in its directory tree:
   // `path.relative` answers with a `..` chain, which is an escape route rather
-  // than a directory name, so the file stays ungrouped.
+  // than a directory name, so the file stays ungrouped. On Windows it cannot
+  // even build that chain across drives (`C:\ws` to `D:\other`) and answers with
+  // an absolute path instead, which is the same "outside" verdict in another
+  // shape and never occurs on POSIX. Deciding this ahead of the rules is what
+  // stops a catch-all pattern such as `**` from claiming those files.
   if (
     relativePath === ".." ||
     relativePath.startsWith("../") ||
@@ -84,6 +100,10 @@ function resolveWithCompiledRules(
     return [];
   }
 
+  // The two branches below hand back chains of different shapes, and callers
+  // that read the chain as an ancestor list have to account for both: a rule
+  // names one group outright, so its chain has no ancestors to walk, while
+  // automatic grouping mirrors the directory tree and does.
   for (const rule of rules) {
     if (rule.matcher.test(relativePath)) {
       return [rule.name];

@@ -56,7 +56,7 @@
           }
         },
         "fileGraph.groups.autoDepth": {
-          "type": "number",
+          "type": "integer",
           "default": 2,
           "minimum": 0,
           "maximum": 6,

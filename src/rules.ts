@@ -9,9 +9,14 @@ import type {
  *
  * A rule names two group ids and forbids the dependency between them; anything
  * not declared is allowed. The ends are matched against the whole `groupPath` of
- * a node rather than its deepest group, because the path is an ancestor chain:
- * naming `src/domain` therefore covers every group nested under it. A node with
- * an empty path belongs to no group and so matches nothing.
+ * a node rather than its deepest group, so that naming an outer group reaches
+ * the groups inside it. That reach only exists where automatic grouping built
+ * the path, because only there is the path an ancestor chain. A file claimed by
+ * a `groups.rules` entry carries just that rule's name, with no ancestors above
+ * it, so naming `src` does not reach a group a rule called `Domain` even when
+ * its pattern was `src/domain/**` - adding that one naming rule silently takes
+ * the file out of every rule written against its directories. A node with an
+ * empty path belongs to no group and so matches nothing.
  *
  * One dependency breaking several rules is reported once per rule, as the rule
  * is what the reader has to act on.

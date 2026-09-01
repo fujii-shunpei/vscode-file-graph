@@ -1,9 +1,15 @@
 import { type GraphEdge } from "../types/graph";
 import { NODE_HEIGHT } from "./layout";
 
-/** A single UE5-style connection pin on a node. */
+/**
+ * A single UE5-style connection pin on a node.
+ *
+ * Deliberately holds no handle id: the direction of a pin is which of the two
+ * `NodePins` arrays it sits in, and the handle id follows from that plus `peerId`.
+ * Carrying the id as well would let an input pin be built bearing an output id, which
+ * no type could reject and which React Flow answers by silently dropping the wire.
+ */
 export interface PinInfo {
-  handleId: string;
   peerId: string;
   edgeType: string;
   peerLabel: string;
@@ -63,13 +69,11 @@ export function computeNodePins(
     seen.add(key);
 
     pinsOf(edge.source).outgoing.push({
-      handleId: outHandleId(edge.target),
       peerId: edge.target,
       edgeType: edge.type,
       peerLabel: labelById.get(edge.target) ?? edge.target,
     });
     pinsOf(edge.target).incoming.push({
-      handleId: inHandleId(edge.source),
       peerId: edge.source,
       edgeType: edge.type,
       peerLabel: labelById.get(edge.source) ?? edge.source,

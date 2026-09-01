@@ -26,8 +26,21 @@ export default function App() {
   const graphData = graphPayload?.data ?? null;
   const structure = graphPayload?.structure ?? null;
   const unresolved = graphPayload?.unresolved ?? null;
+  // Reported in both views, unlike the findings that `findingsApply` withholds: this
+  // is not read off the graph but observed while it was built, and the local view
+  // reads the whole workspace looking for what imports the focus, so a path it could
+  // not open there is as real as one the overview met.
+  const unreadable = graphPayload?.unreadable ?? null;
   const view = graphPayload?.view ?? "local";
   const groupingEnabled = view === "overview" || showGroups;
+
+  // Whether the graph on screen is complete enough to be judged by. The local view is
+  // walked outward from one file, so every node but the origin keeps only the
+  // dependencies the walk arrived by and loses the rest of its fan-in (issue #15).
+  // Cycles and rule violations counted over it can therefore only come out low, and a
+  // "0 rule errors" that means "not looked at" is read as a clean bill of health. The
+  // findings are withheld where they cannot be trusted rather than stated too small.
+  const findingsApply = view === "overview";
 
   // "Toggled" means the opposite thing in each view, so the exceptions are dropped
   // when the view changes. Adjusting during render keeps the two in step within one
@@ -203,11 +216,16 @@ export default function App() {
         currentFile={currentFile}
         nodeCount={display.fileNodes.length}
         edgeCount={display.displayEdges.length}
-        cycleCount={structure?.cycles.length ?? 0}
-        groupCycleCount={display.grouped ? (structure?.groupCycles.length ?? 0) : 0}
-        errorCount={violationCounts.error}
-        warningCount={violationCounts.warning}
+        cycleCount={findingsApply ? (structure?.cycles.length ?? 0) : 0}
+        groupCycleCount={
+          findingsApply && display.grouped
+            ? (structure?.groupCycles.length ?? 0)
+            : 0
+        }
+        errorCount={findingsApply ? violationCounts.error : 0}
+        warningCount={findingsApply ? violationCounts.warning : 0}
         unresolved={unresolved}
+        unreadable={unreadable}
       />
     </div>
   );

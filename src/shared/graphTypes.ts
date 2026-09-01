@@ -7,13 +7,32 @@ export interface GraphNode {
   label: string;
   layer: string;
   isFocused: boolean;
-  /** Ancestor chain of the groups this file belongs to, shallow to deep. Empty when ungrouped. */
+  /**
+   * The groups this file belongs to, shallow to deep. Empty when ungrouped.
+   *
+   * Only automatic grouping makes this an ancestor chain; a file claimed by a
+   * user group rule gets that one name and nothing above it, because the rule
+   * declares a group rather than a position in the directory tree. So anything
+   * that treats the array as "this group and all its ancestors" is reading a
+   * guarantee that half the files do not carry.
+   */
   groupPath: string[];
 }
 
+/**
+ * A dependency from one file to another.
+ *
+ * At most one per ordered pair of files. A file can reach the same target through
+ * several statements, and that is still one dependency: one line drawn, one unit of
+ * weight behind a group pair, one rule violation to act on.
+ */
 export interface GraphEdge {
   source: string;
   target: string;
+  /**
+   * How the dependency was written - `import`, `require`, `use` - for the reader.
+   * Where several statements reach the same target, this is the first of them.
+   */
   type: string;
 }
 
@@ -108,10 +127,42 @@ export interface UnresolvedImports {
   samples: UnresolvedImport[];
 }
 
-/** What one analysis run produced: the graph, and the imports left out of it. */
+/** A path the analysis named but could not open. */
+export interface UnreadablePath {
+  /** The path, relative to the workspace root. */
+  path: string;
+  /**
+   * What went missing with it. A file keeps its node and loses every dependency it
+   * declared; a directory takes its whole subtree out of the graph unseen. The two
+   * are held apart rather than added up, because one number cannot say which of the
+   * two a reader is looking at.
+   */
+  kind: "file" | "directory";
+  /** The errno the read failed with: `EACCES`, `ENOENT`, `EMFILE`, `ELOOP`. */
+  reason: string;
+}
+
+/**
+ * The paths an analysis walked over and could not open.
+ *
+ * Counted for the reason `UnresolvedImports` is, one step earlier. A file whose
+ * contents never arrived declares no imports, so it reaches the graph as a node with
+ * nothing leaving it - the exact shape of a file that imports nothing. It is the
+ * quieter of the two failures: `unresolved` stays at zero for it, and so states that
+ * nothing was left out of the picture.
+ */
+export interface UnreadablePaths {
+  /** How many, including the ones beyond `samples`. */
+  count: number;
+  /** The first few, so that what is missing can be named and not only counted. */
+  samples: UnreadablePath[];
+}
+
+/** What one analysis run produced: the graph, and what could not be put into it. */
 export interface AnalysisResult {
   graph: GraphData;
   unresolved: UnresolvedImports;
+  unreadable: UnreadablePaths;
 }
 
 /** Wire envelope from the extension host to the webview. */
@@ -120,4 +171,10 @@ export interface GraphPayload {
   data: GraphData;
   structure: StructureAnalysis;
   unresolved: UnresolvedImports;
+  /**
+   * Carried for the same reason as `unresolved`, and required rather than optional:
+   * a count that is gathered and never sent is a failure counted in private, which
+   * is the silence the count exists to break.
+   */
+  unreadable: UnreadablePaths;
 }

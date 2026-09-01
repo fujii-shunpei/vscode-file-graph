@@ -73,8 +73,10 @@ export function buildGroupTree(nodes: GraphNode[]): GroupTreeNode[] {
  *
  * Everything below a collapsed group disappears - descendant groups included - and
  * the collapsed group itself stands in for its whole subtree. Edges that touched a
- * folded file are rewritten onto that stand-in, edges that end up inside a single
- * group are dropped, and duplicates of the resulting endpoint pair collapse into one.
+ * folded file are rewritten onto that stand-in, edges whose two ends land on the same
+ * stand-in are dropped, and duplicates of the resulting endpoint pair collapse into
+ * one. Only that collapse into a shared stand-in drops an edge: a dependency between
+ * two files of an expanded group keeps both its ends and is drawn like any other.
  */
 export function deriveVisibleGraph(
   nodes: GraphNode[],
