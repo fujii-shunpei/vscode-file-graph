@@ -1,0 +1,162 @@
+import * as path from "path";
+import type { GraphData, GroupRule } from "./shared/graphTypes";
+
+export interface GroupConfig {
+  rules: GroupRule[];
+  autoDepth: number;
+}
+
+function escapeRegExpChar(char: string): string {
+  return /[.*+?^${}()|[\]\\]/.test(char) ? `\\${char}` : char;
+}
+
+function toPosix(value: string): string {
+  return value.replace(/\\/g, "/");
+}
+
+/**
+ * Compile a glob pattern into an anchored RegExp.
+ * Supports `*` (any run of characters inside one segment), `**` (spans zero or
+ * more segments) and `?` (exactly one character). Every other character is
+ * matched literally.
+ */
+export function globToRegExp(glob: string): RegExp {
+  let source = "";
+  let i = 0;
+
+  while (i < glob.length) {
+    const char = glob[i];
+
+    if (char === "*" && glob[i + 1] === "*") {
+      // Adjacent `**` name the same set of paths as one `**`, but emitting one
+      // group each hands the engine that many overlapping ways to split the same
+      // separators, and the cost of *rejecting* a path grows exponentially with
+      // the count: on a deep path six of them take ~25ms and nine take ~3s. Every
+      // rule is tested against every node, so a pattern as ordinary as
+      // `src/**/**/*.ts` would stall the extension host with no error and no
+      // progress to explain it. Folding the run keeps that cost flat.
+      let boundedToDirectories = true;
+      while (glob[i] === "*" && glob[i + 1] === "*") {
+        if (glob[i + 2] === "/") {
+          i += 3;
+        } else {
+          // A bare `**` is not tied to a separator, and one of them anywhere in
+          // the run lets the whole run start and end mid-segment.
+          boundedToDirectories = false;
+          i += 2;
+        }
+      }
+      // `**/` also has to match zero directories, so the slash is optional too.
+      source += boundedToDirectories ? "(?:.*/)?" : ".*";
+    } else if (char === "*") {
+      source += "[^/]*";
+      i += 1;
+    } else if (char === "?") {
+      source += "[^/]";
+      i += 1;
+    } else {
+      source += escapeRegExpChar(char);
+      i += 1;
+    }
+  }
+
+  return new RegExp(`^${source}$`);
+}
+
+interface CompiledRule {
+  matcher: RegExp;
+  name: string;
+}
+
+function compileRules(rules: GroupRule[]): CompiledRule[] {
+  return rules.map((rule) => ({
+    matcher: globToRegExp(rule.pattern),
+    name: rule.name,
+  }));
+}
+
+function resolveWithCompiledRules(
+  filePath: string,
+  workspaceRoot: string,
+  rules: CompiledRule[],
+  autoDepth: number
+): string[] {
+  const relativePath = toPosix(
+    path.relative(toPosix(workspaceRoot), toPosix(filePath))
+  );
+
+  // A file resolved outside the workspace has no place in its directory tree:
+  // `path.relative` answers with a `..` chain, which is an escape route rather
+  // than a directory name, so the file stays ungrouped. On Windows it cannot
+  // even build that chain across drives (`C:\ws` to `D:\other`) and answers with
+  // an absolute path instead, which is the same "outside" verdict in another
+  // shape and never occurs on POSIX. Deciding this ahead of the rules is what
+  // stops a catch-all pattern such as `**` from claiming those files.
+  if (
+    relativePath === ".." ||
+    relativePath.startsWith("../") ||
+    path.isAbsolute(relativePath)
+  ) {
+    return [];
+  }
+
+  // The two branches below hand back chains of different shapes, and callers
+  // that read the chain as an ancestor list have to account for both: a rule
+  // names one group outright, so its chain has no ancestors to walk, while
+  // automatic grouping mirrors the directory tree and does.
+  for (const rule of rules) {
+    if (rule.matcher.test(relativePath)) {
+      return [rule.name];
+    }
+  }
+
+  const directories = relativePath.split("/").slice(0, -1);
+  const depth = Math.min(autoDepth, directories.length);
+  const chain: string[] = [];
+  for (let i = 0; i < depth; i++) {
+    chain.push(directories.slice(0, i + 1).join("/"));
+  }
+  return chain;
+}
+
+/**
+ * Resolve the group chain a file belongs to, shallow to deep.
+ * Rules win over automatic grouping and are evaluated in order, so the first
+ * matching rule yields a single-element chain. Otherwise the leading directory
+ * segments up to `autoDepth` become a chain of cumulative paths.
+ * Returns an empty array when the file belongs to no group.
+ */
+export function resolveGroupPath(
+  filePath: string,
+  workspaceRoot: string,
+  config: GroupConfig
+): string[] {
+  return resolveWithCompiledRules(
+    filePath,
+    workspaceRoot,
+    compileRules(config.rules),
+    config.autoDepth
+  );
+}
+
+/** Return a copy of the graph with every node's groupPath resolved. Never mutates the input. */
+export function attachGroups(
+  data: GraphData,
+  workspaceRoot: string,
+  config: GroupConfig
+): GraphData {
+  // Compiled once for the whole graph: the rules do not change while it is walked.
+  const rules = compileRules(config.rules);
+  return {
+    nodes: data.nodes.map((node) => ({
+      ...node,
+      groupPath: resolveWithCompiledRules(
+        node.id,
+        workspaceRoot,
+        rules,
+        config.autoDepth
+      ),
+    })),
+    edges: data.edges,
+  };
+}

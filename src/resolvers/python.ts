@@ -1,6 +1,8 @@
 import * as path from "path";
 import * as fs from "fs";
 import { LanguageResolver, ResolvedImport } from "./types";
+import { PYTHON_COMMENT_SYNTAX, stripComments } from "./comments";
+import { toNodeId } from "../paths/pathId";
 
 export class PythonResolver implements LanguageResolver {
   languageIds = ["python"];
@@ -13,6 +15,8 @@ export class PythonResolver implements LanguageResolver {
   ): ResolvedImport[] {
     const imports: ResolvedImport[] = [];
     const seen = new Set<string>();
+    // `unterminated` is dropped: nothing reports a partly read file to the user yet.
+    const { source } = stripComments(content, PYTHON_COMMENT_SYNTAX);
 
     const addImport = (raw: string, resolved: string | null, type: string) => {
       if (resolved && seen.has(resolved)) return;
@@ -23,7 +27,7 @@ export class PythonResolver implements LanguageResolver {
     // from module import name / from module import *
     const fromImportRegex = /^\s*from\s+(\.{0,3}[\w.]*)\s+import\s+/gm;
     let match;
-    while ((match = fromImportRegex.exec(content)) !== null) {
+    while ((match = fromImportRegex.exec(source)) !== null) {
       const module = match[1];
       const resolved = this.resolveModule(module, filePath, workspaceRoot);
       addImport(module, resolved, "from-import");
@@ -31,7 +35,7 @@ export class PythonResolver implements LanguageResolver {
 
     // import module / import module as alias / import mod1, mod2
     const importRegex = /^\s*import\s+([\w.]+(?:\s+as\s+\w+)?(?:\s*,\s*[\w.]+(?:\s+as\s+\w+)?)*)/gm;
-    while ((match = importRegex.exec(content)) !== null) {
+    while ((match = importRegex.exec(source)) !== null) {
       const moduleList = match[1];
       // Split by comma, strip "as alias"
       const modules = moduleList.split(",").map((m) =>
@@ -112,12 +116,12 @@ export class PythonResolver implements LanguageResolver {
     // Exact file: module.py
     const pyFile = base + ".py";
     const stat = fs.statSync(pyFile, { throwIfNoEntry: false });
-    if (stat?.isFile()) return pyFile;
+    if (stat?.isFile()) return toNodeId(pyFile);
 
     // Package: module/__init__.py
     const initFile = path.join(base, "__init__.py");
     const initStat = fs.statSync(initFile, { throwIfNoEntry: false });
-    if (initStat?.isFile()) return initFile;
+    if (initStat?.isFile()) return toNodeId(initFile);
 
     return null;
   }

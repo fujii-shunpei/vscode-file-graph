@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { GraphData } from "./analyzer";
+import type { GraphPayload } from "./shared/graphTypes";
 
 export interface PanelCallbacks {
   onMessage?: (message: any) => void;
@@ -33,9 +33,20 @@ export class GraphPanel {
     );
   }
 
+  /**
+   * Reveal the panel and draw the payload in it.
+   *
+   * The payload arrives whole rather than as one argument per field: every part of
+   * it is something the host gathered and the webview has to be told, so a new one
+   * would otherwise become another positional argument here, in `update` and at
+   * both call sites - four places to add it and one to forget.
+   *
+   * @param focusLabel What the graph is centred on, for the panel title. Not part of
+   * the payload: it is read by the window chrome, which the webview never sees.
+   */
   static show(
     extensionUri: vscode.Uri,
-    graphData: GraphData,
+    payload: GraphPayload,
     focusLabel: string,
     callbacks?: PanelCallbacks,
   ): GraphPanel {
@@ -44,7 +55,7 @@ export class GraphPanel {
     if (GraphPanel.currentPanel) {
       GraphPanel.currentPanel.panel.reveal(column);
       if (callbacks) GraphPanel.currentPanel.callbacks = callbacks;
-      GraphPanel.currentPanel.update(graphData, focusLabel);
+      GraphPanel.currentPanel.update(payload, focusLabel);
       return GraphPanel.currentPanel;
     }
 
@@ -63,25 +74,25 @@ export class GraphPanel {
 
     GraphPanel.currentPanel = new GraphPanel(panel, extensionUri);
     if (callbacks) GraphPanel.currentPanel.callbacks = callbacks;
-    GraphPanel.currentPanel.update(graphData, focusLabel);
+    GraphPanel.currentPanel.update(payload, focusLabel);
     return GraphPanel.currentPanel;
   }
 
-  private update(graphData: GraphData, focusLabel: string): void {
+  private update(payload: GraphPayload, focusLabel: string): void {
     this.panel.title = `File Graph: ${focusLabel}`;
 
     if (!this.initialized) {
-      this.panel.webview.html = this.getHtml(graphData);
+      this.panel.webview.html = this.getHtml(payload);
       this.initialized = true;
     } else {
       this.panel.webview.postMessage({
         command: "updateGraph",
-        data: graphData,
+        data: payload,
       });
     }
   }
 
-  private getHtml(graphData: GraphData): string {
+  private getHtml(payload: GraphPayload): string {
     const webview = this.panel.webview;
     const webviewDir = vscode.Uri.joinPath(this.extensionUri, "out", "webview");
 
@@ -93,7 +104,11 @@ export class GraphPanel {
     );
 
     const nonce = getNonce();
-    const data = JSON.stringify(graphData);
+    // Group names come from user settings, so the payload can contain `</script>`,
+    // which HTML would treat as the end of the inline script no matter that it sits
+    // inside a JS string. `<` is the same character to JSON.parse, not to the
+    // HTML tokenizer.
+    const data = JSON.stringify(payload).replace(/</g, "\\u003c");
 
     return /*html*/ `<!DOCTYPE html>
 <html lang="en">

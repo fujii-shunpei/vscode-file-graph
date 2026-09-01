@@ -2,5 +2,7 @@
 node_modules/**
 src/**
 webview-ui/**
+out/test/**
+.vscode-test/**
 tsconfig.json
 .gitignore
