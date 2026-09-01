@@ -287,6 +287,55 @@ suite("from files on disk to rule violations", () => {
     );
   });
 
+  test("a file measured against the folder beside its own loses its groups and its rules", () => {
+    // The multi-root workspace in the shape the extension meets it: two folders, and
+    // the file to draw sits in the second one. Only the folder holding a file can be
+    // the root its view counts from, and which folder that is has to be decided per
+    // file rather than taken as the first one.
+    write("frontend/src/app/Main.ts", "export const main = 1;\n");
+    write("backend/src/api/Client.ts", "export const send = () => 1;\n");
+    write("backend/src/domain/Order.ts", `import { send } from "../api/Client";\n`);
+    const rules: DependencyRule[] = [
+      {
+        name: "domain is independent",
+        from: "src/domain",
+        to: "src/api",
+        severity: "error",
+      },
+    ];
+    const focus = id("backend/src/domain/Order.ts");
+
+    const ownFolder = runLocalPipeline(focus, id("backend"), byDirectory(), rules);
+    const folderBeside = runLocalPipeline(focus, id("frontend"), byDirectory(), rules);
+
+    assert.deepStrictEqual(
+      ownFolder.data.nodes.map((node) => [node.label, node.groupPath]),
+      [
+        [path.join("src", "domain", "Order.ts"), ["src", "src/domain"]],
+        [path.join("src", "api", "Client.ts"), ["src", "src/api"]],
+      ]
+    );
+    assert.deepStrictEqual(
+      ownFolder.structure.violations.map((violation) => violation.ruleName),
+      ["domain is independent"]
+    );
+
+    // The reading that must not pass: the same two files, the same import and the
+    // same rule, counted from the folder next door. Every label is a way out of that
+    // folder, every node is ungrouped, and the empty violation list is the answer of
+    // a check that had no groups to run against - not of a workspace that breaks no
+    // rule, which is what it looks like on the way out.
+    assert.deepStrictEqual(
+      folderBeside.data.nodes.map((node) => [node.label, node.groupPath]),
+      [
+        [path.join("..", "backend", "src", "domain", "Order.ts"), []],
+        [path.join("..", "backend", "src", "api", "Client.ts"), []],
+      ]
+    );
+    assert.deepStrictEqual(folderBeside.structure.violations, []);
+    assert.deepStrictEqual(folderBeside.structure.groupDependencies, []);
+  });
+
   test("an import that named no file is still reported when the passes are done", () => {
     write("src/domain/User.ts", `import * as React from "react";\n`);
 

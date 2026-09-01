@@ -298,12 +298,44 @@ function readForbiddenRules(scope: vscode.Uri): DependencyRule[] {
   return validateForbiddenRules(config.get<unknown>("rules.forbidden", []));
 }
 
+/**
+ * The folder a graph centred on `filePath` is measured against, or `null` once the
+ * reason it has none has been reported.
+ *
+ * Everything the local view says about a file it says relative to one root: the
+ * label is the path from it, `attachGroups` reads the group a file belongs to from
+ * it, and the settings driving both are declared `"scope": "resource"`, so the
+ * folder also decides which `.vscode/settings.json` answers. In a multi-root
+ * workspace only the folder holding the file can play that part. Measured from a
+ * folder beside it, `path.relative` yields a `..` chain, which grouping reads as
+ * outside the workspace: the file and everything it reaches lose their groups, the
+ * forbidden rules are then checked against groups that are not there, and the view
+ * reads as a workspace that breaks no rule rather than one that was never checked.
+ *
+ * A file no folder holds has no such root and nothing that can stand in for one.
+ * The first folder is what puts those `..` chains there, and the file's own
+ * directory is a root the user never declared - one the incoming scan would then
+ * walk. So the view is refused and the reason said, rather than drawn against a
+ * root that does not hold the file.
+ */
+function resolveGraphFolder(filePath: string): vscode.WorkspaceFolder | null {
+  // Looked up by the path as VS Code spells it, ahead of the canonicalization
+  // below: a workspace opened through a symlink has folder uris spelled that way
+  // too, and a canonical path would match none of them.
+  const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(filePath));
+  if (folder) return folder;
+
+  vscode.window.showWarningMessage(
+    vscode.workspace.workspaceFolders?.length
+      ? `${path.basename(filePath)} is outside every open workspace folder. Add the folder holding it to the workspace to graph it.`
+      : "No workspace folder is open."
+  );
+  return null;
+}
+
 function showGraph(filePath: string): void {
-  const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-  if (!workspaceFolder) {
-    vscode.window.showWarningMessage("No workspace folder is open.");
-    return;
-  }
+  const workspaceFolder = resolveGraphFolder(filePath);
+  if (!workspaceFolder) return;
 
   lastFilePath = filePath;
   currentView = "local";
@@ -352,6 +384,12 @@ function showGraph(filePath: string): void {
 }
 
 function showOverview(): void {
+  // The first folder and no other, unlike the local view, which takes the folder
+  // holding the file it is centred on. This view is centred on nothing, so there is
+  // no file to name the folder that should answer for it, and the graph it builds
+  // counts from a single root: labels, groups and the rules read against them are
+  // all measured from one. In a multi-root workspace the folders after the first
+  // are therefore left out of the overview.
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
   if (!workspaceFolder) {
     vscode.window.showWarningMessage("No workspace folder is open.");
