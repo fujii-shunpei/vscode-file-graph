@@ -1,21 +1,13 @@
-// Types mirror src/analyzer.ts (extension host). Keep in sync.
-export interface GraphNode {
-  id: string;
-  label: string;
-  layer: string;
-  isFocused: boolean;
-}
-
-export interface GraphEdge {
-  source: string;
-  target: string;
-  type: string;
-}
-
-export interface GraphData {
-  nodes: GraphNode[];
-  edges: GraphEdge[];
-}
+export type {
+  DependencyCycle,
+  GraphData,
+  GraphEdge,
+  GraphNode,
+  GraphPayload,
+  GroupDependency,
+  RuleViolation,
+  StructureAnalysis,
+} from "../../../src/shared/graphTypes";
 
 export const LAYER_COLORS: Record<string, string> = {
   Route: "#fff176",
@@ -41,6 +33,25 @@ export const LAYER_COLORS: Record<string, string> = {
   Config: "#78909c",
   Other: "#bdbdbd",
 };
+
+export const GROUP_PALETTE = [
+  "#4fc3f7", "#81c784", "#ffb74d", "#ba68c8", "#4db6ac",
+  "#f06292", "#7986cb", "#aed581", "#ff8a65", "#9575cd",
+  "#4dd0e1", "#dce775",
+];
+
+/**
+ * Palette colour of a group. Groups come from user configuration, so unlike the layers
+ * they cannot be enumerated in a fixed table; the colour is hashed from the group name
+ * instead, which keeps it stable across renders and across sessions.
+ */
+export function groupColor(group: string): string {
+  let hash = 0;
+  for (let i = 0; i < group.length; i++) {
+    hash = (hash * 31 + group.charCodeAt(i)) | 0;
+  }
+  return GROUP_PALETTE[Math.abs(hash) % GROUP_PALETTE.length];
+}
 
 export const LAYER_ORDER = [
   "Route", "Middleware", "Controller", "Page", "Component", "Request",

@@ -1,0 +1,34 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Run Extension",
+            "type": "extensionHost",
+            "request": "launch",
+            "args": [
+                "--extensionDevelopmentPath=${workspaceFolder}"
+            ],
+            // out/webview は vite がバンドルした webview 用の成果物で拡張ホスト側では実行されないため、
+            // ソースマップ探索の対象から外す。
+            "outFiles": [
+                "${workspaceFolder}/out/**/*.js",
+                "!${workspaceFolder}/out/webview/**"
+            ],
+            "preLaunchTask": "npm: compile"
+        },
+        {
+            "name": "Extension Tests",
+            "type": "extensionHost",
+            "request": "launch",
+            "args": [
+                "--extensionDevelopmentPath=${workspaceFolder}",
+                "--extensionTestsPath=${workspaceFolder}/out/test/suite/index"
+            ],
+            "outFiles": [
+                "${workspaceFolder}/out/**/*.js",
+                "!${workspaceFolder}/out/webview/**"
+            ],
+            "preLaunchTask": "npm: compile"
+        }
+    ]
+}

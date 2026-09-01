@@ -1,25 +1,19 @@
 import * as fs from "fs";
 import * as path from "path";
-import { LanguageResolver, ResolvedImport } from "./resolvers/types";
+import { LanguageResolver } from "./resolvers/types";
+import { clearPathIdCache, toNodeId } from "./paths/pathId";
+import type {
+  AnalysisResult,
+  GraphData,
+  GraphEdge,
+  GraphNode,
+  UnresolvedImports,
+} from "./shared/graphTypes";
 
-// Types mirrored in webview-ui/src/types/graph.ts (webview process). Keep in sync.
-export interface GraphNode {
-  id: string;
-  label: string;
-  layer: string;
-  isFocused: boolean;
-}
+export type { AnalysisResult, GraphData, GraphEdge, GraphNode };
 
-export interface GraphEdge {
-  source: string;
-  target: string;
-  type: string;
-}
-
-export interface GraphData {
-  nodes: GraphNode[];
-  edges: GraphEdge[];
-}
+/** How many unresolved imports an analysis names; the count still covers the rest. */
+const UNRESOLVED_SAMPLE_LIMIT = 10;
 
 // Extension pattern: (php|tsx?|jsx?) covers .php, .ts, .tsx, .js, .jsx
 const EXT = String.raw`(php|tsx?|jsx?)`;
@@ -47,6 +41,10 @@ const LAYER_PATTERNS: Record<string, RegExp[]> = {
   Type: [/types?\//i, /interfaces?\//i, new RegExp(`\\.type\\.${EXT}$`, "i"), /\.d\.ts$/i],
   Test: [/(__tests__|tests?|spec)\//i, new RegExp(`\\.(test|spec)\\.${EXT}$`, "i")],
 };
+
+function emptyUnresolved(): UnresolvedImports {
+  return { count: 0, samples: [] };
+}
 
 function detectLayer(filePath: string): string {
   for (const [layer, patterns] of Object.entries(LAYER_PATTERNS)) {
@@ -92,42 +90,120 @@ export class DependencyAnalyzer {
     focusFilePath: string,
     workspaceRoot: string,
     maxDepth: number = 2
-  ): GraphData {
+  ): AnalysisResult {
     const nodes = new Map<string, GraphNode>();
     const edges: GraphEdge[] = [];
     const visited = new Set<string>();
+    const unresolved = emptyUnresolved();
+
+    // Node ids are canonical paths, so the entry points have to be canonical too:
+    // otherwise the focused file gets a second node the moment an import reaches it.
+    const focusId = toNodeId(focusFilePath);
+    const rootId = toNodeId(workspaceRoot);
 
     // Add the focused file
-    const focusLabel = this.toLabel(focusFilePath, workspaceRoot);
-    nodes.set(focusFilePath, {
-      id: focusFilePath,
-      label: focusLabel,
-      layer: detectLayer(focusFilePath),
-      isFocused: true,
-    });
+    nodes.set(focusId, this.buildNode(focusId, rootId, true));
 
     // Explore outgoing dependencies (files this file imports)
     this.exploreOutgoing(
-      focusFilePath,
-      workspaceRoot,
+      focusId,
+      rootId,
       nodes,
       edges,
       visited,
-      maxDepth
+      maxDepth,
+      unresolved
     );
 
-    // Explore incoming dependencies (files that import this file)
+    // Explore incoming dependencies (files that import this file). Their own
+    // unresolved imports are not counted: this pass reads every file in the
+    // workspace to find the few that point here, and reporting what the rest of the
+    // workspace failed to resolve would answer a question this view never asked.
     this.exploreIncoming(
-      focusFilePath,
-      workspaceRoot,
+      focusId,
+      rootId,
       nodes,
       edges
     );
 
     return {
-      nodes: Array.from(nodes.values()),
-      edges,
+      graph: {
+        nodes: Array.from(nodes.values()),
+        edges,
+      },
+      unresolved,
     };
+  }
+
+  /**
+   * Build a dependency graph for the whole workspace.
+   * Every scannable file becomes a node and every resolved import becomes an edge,
+   * with no focus file and no depth limit.
+   */
+  analyzeOverview(workspaceRoot: string): AnalysisResult {
+    const nodes = new Map<string, GraphNode>();
+    const edges: GraphEdge[] = [];
+    const unresolved = emptyUnresolved();
+    // Canonical, to match the ids the collected files and the resolvers produce.
+    const rootId = toNodeId(workspaceRoot);
+
+    for (const filePath of this.collectFiles(rootId)) {
+      if (!nodes.has(filePath)) {
+        nodes.set(filePath, this.buildNode(filePath, rootId, false));
+      }
+
+      const resolver = this.getResolver(filePath);
+      if (!resolver) continue;
+
+      const content = this.readFile(filePath);
+      if (!content) continue;
+
+      const imports = resolver.resolveImports(content, filePath, rootId);
+
+      for (const imp of imports) {
+        if (!imp.resolvedPath) {
+          this.recordUnresolved(unresolved, filePath, rootId, imp.raw);
+          continue;
+        }
+
+        if (!nodes.has(imp.resolvedPath)) {
+          nodes.set(
+            imp.resolvedPath,
+            this.buildNode(imp.resolvedPath, rootId, false)
+          );
+        }
+
+        edges.push({
+          source: filePath,
+          target: imp.resolvedPath,
+          type: imp.type,
+        });
+      }
+    }
+
+    return {
+      graph: {
+        nodes: Array.from(nodes.values()),
+        edges,
+      },
+      unresolved,
+    };
+  }
+
+  /** Note an import that reached no file, keeping the first few by name. */
+  private recordUnresolved(
+    unresolved: UnresolvedImports,
+    filePath: string,
+    workspaceRoot: string,
+    raw: string
+  ): void {
+    unresolved.count++;
+    if (unresolved.samples.length < UNRESOLVED_SAMPLE_LIMIT) {
+      unresolved.samples.push({
+        file: this.toLabel(filePath, workspaceRoot),
+        raw,
+      });
+    }
   }
 
   private exploreOutgoing(
@@ -136,7 +212,8 @@ export class DependencyAnalyzer {
     nodes: Map<string, GraphNode>,
     edges: GraphEdge[],
     visited: Set<string>,
-    depth: number
+    depth: number,
+    unresolved: UnresolvedImports
   ): void {
     if (depth <= 0 || visited.has(filePath)) return;
     visited.add(filePath);
@@ -150,15 +227,16 @@ export class DependencyAnalyzer {
     const imports = resolver.resolveImports(content, filePath, workspaceRoot);
 
     for (const imp of imports) {
-      if (!imp.resolvedPath) continue;
+      if (!imp.resolvedPath) {
+        this.recordUnresolved(unresolved, filePath, workspaceRoot, imp.raw);
+        continue;
+      }
 
       if (!nodes.has(imp.resolvedPath)) {
-        nodes.set(imp.resolvedPath, {
-          id: imp.resolvedPath,
-          label: this.toLabel(imp.resolvedPath, workspaceRoot),
-          layer: detectLayer(imp.resolvedPath),
-          isFocused: false,
-        });
+        nodes.set(
+          imp.resolvedPath,
+          this.buildNode(imp.resolvedPath, workspaceRoot, false)
+        );
       }
 
       edges.push({
@@ -173,7 +251,8 @@ export class DependencyAnalyzer {
         nodes,
         edges,
         visited,
-        depth - 1
+        depth - 1,
+        unresolved
       );
     }
   }
@@ -205,12 +284,7 @@ export class DependencyAnalyzer {
       for (const imp of imports) {
         if (imp.resolvedPath === targetFilePath) {
           if (!nodes.has(filePath)) {
-            nodes.set(filePath, {
-              id: filePath,
-              label: this.toLabel(filePath, workspaceRoot),
-              layer: detectLayer(filePath),
-              isFocused: false,
-            });
+            nodes.set(filePath, this.buildNode(filePath, workspaceRoot, false));
           }
 
           edges.push({
@@ -226,15 +300,20 @@ export class DependencyAnalyzer {
   private static readonly SKIP_DIRS = new Set([
     "node_modules", "vendor", ".git", "storage", "bootstrap", "public",
     ".idea", ".vscode", "dist", "build", "out", ".next", ".nuxt",
-    "coverage", ".turbo", ".cache",
+    "coverage", ".turbo", ".cache", ".vscode-test", ".venv", "venv",
+    "__pycache__", ".pytest_cache", "target", ".gradle", ".mvn",
   ]);
 
   private collectFiles(
     dir: string,
     result: string[] = [],
-    depth: number = 0
+    visitedDirs: Set<string> = new Set()
   ): string[] {
-    if (depth > 10) return result;
+    // There is no depth limit, so a directory that leads back to itself would
+    // never end. Canonical paths make a repeat visit recognisable.
+    const dirId = toNodeId(dir);
+    if (visitedDirs.has(dirId)) return result;
+    visitedDirs.add(dirId);
 
     try {
       const entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -244,13 +323,13 @@ export class DependencyAnalyzer {
             this.collectFiles(
               path.join(dir, entry.name),
               result,
-              depth + 1
+              visitedDirs
             );
           }
         } else if (entry.isFile()) {
           const ext = path.extname(entry.name);
           if (this.resolvers.some((r) => r.fileExtensions.includes(ext))) {
-            result.push(path.join(dir, entry.name));
+            result.push(toNodeId(path.join(dir, entry.name)));
           }
         }
       }
@@ -265,8 +344,27 @@ export class DependencyAnalyzer {
     return path.relative(workspaceRoot, filePath);
   }
 
+  /** Build a graph node. groupPath is left empty here; grouping is a separate post-processing pass. */
+  private buildNode(
+    filePath: string,
+    workspaceRoot: string,
+    isFocused: boolean
+  ): GraphNode {
+    // The layer is read from the path inside the workspace: the directories above
+    // the workspace root are the machine's business, not the architecture's.
+    const relativePath = this.toLabel(filePath, workspaceRoot);
+    return {
+      id: filePath,
+      label: relativePath,
+      layer: detectLayer(relativePath),
+      isFocused,
+      groupPath: [],
+    };
+  }
+
   clearCache(): void {
     this.fileCache.clear();
+    clearPathIdCache();
     for (const resolver of this.resolvers) {
       resolver.clearCache?.();
     }

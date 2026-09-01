@@ -1,5 +1,11 @@
 import { useMemo, useState, useCallback } from "react";
 import { useVsCode } from "./hooks/useVsCode";
+import { deriveDisplay } from "./lib/display";
+import {
+  type EdgeAccent,
+  deriveCyclicGroupIds,
+  deriveEdgeAccents,
+} from "./lib/structure";
 import { FileGraph } from "./components/FileGraph";
 import { Controls } from "./components/Controls";
 import { Legend } from "./components/Legend";
@@ -7,10 +13,42 @@ import { StatusBar } from "./components/StatusBar";
 import "./App.css";
 
 export default function App() {
-  const { graphData, openFile, setDepth } = useVsCode();
+  const { graphPayload, openFile, setDepth } = useVsCode();
   const [depth, setLocalDepth] = useState(2);
   const [mode, setMode] = useState<"layered" | "force">("layered");
   const [disabledLayers, setDisabledLayers] = useState<Set<string>>(new Set());
+  const [showGroups, setShowGroups] = useState(false);
+  // Groups whose fold state the user flipped away from the default of the current
+  // view. Keeping the exception rather than the absolute set means a group that only
+  // appears later - a settings change renames them - still opens with the default.
+  const [toggledGroupIds, setToggledGroupIds] = useState<Set<string>>(new Set());
+
+  const graphData = graphPayload?.data ?? null;
+  const structure = graphPayload?.structure ?? null;
+  const view = graphPayload?.view ?? "local";
+  const groupingEnabled = view === "overview" || showGroups;
+
+  // "Toggled" means the opposite thing in each view, so the exceptions are dropped
+  // when the view changes. Adjusting during render keeps the two in step within one
+  // render pass instead of drawing the stale combination first.
+  const [viewOfToggles, setViewOfToggles] = useState(view);
+  if (viewOfToggles !== view) {
+    setViewOfToggles(view);
+    setToggledGroupIds(new Set());
+  }
+
+  // The overview is meant to be drilled into, so its groups are folded by default;
+  // the local view keeps them open.
+  const collapsedGroupIds = useMemo(() => {
+    if (view !== "overview") return toggledGroupIds;
+    const collapsed = new Set<string>();
+    for (const node of graphData?.nodes ?? []) {
+      for (const groupId of node.groupPath) {
+        if (!toggledGroupIds.has(groupId)) collapsed.add(groupId);
+      }
+    }
+    return collapsed;
+  }, [view, graphData, toggledGroupIds]);
 
   const handleDepthChange = useCallback(
     (d: number) => {
@@ -40,6 +78,22 @@ export default function App() {
     });
   }, []);
 
+  const handleGroupsToggle = useCallback(() => {
+    setShowGroups((s) => !s);
+  }, []);
+
+  const handleToggleCollapse = useCallback((groupId: string) => {
+    setToggledGroupIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupId)) {
+        next.delete(groupId);
+      } else {
+        next.add(groupId);
+      }
+      return next;
+    });
+  }, []);
+
   const layers = useMemo(() => {
     if (!graphData) return [];
     const counts = new Map<string, number>();
@@ -60,12 +114,43 @@ export default function App() {
     return { filteredNodes: filtered, visibleNodeIds: new Set(filtered.map((n) => n.id)) };
   }, [graphData, disabledLayers]);
 
-  const visibleEdgeCount = useMemo(() => {
-    if (!graphData) return 0;
-    return graphData.edges.filter(
-      (e) => visibleNodeIds.has(e.source) && visibleNodeIds.has(e.target),
-    ).length;
-  }, [graphData, visibleNodeIds]);
+  const display = useMemo(
+    () =>
+      deriveDisplay(
+        filteredNodes,
+        graphData?.edges ?? [],
+        visibleNodeIds,
+        groupingEnabled,
+        collapsedGroupIds,
+      ),
+    [filteredNodes, graphData, visibleNodeIds, groupingEnabled, collapsedGroupIds],
+  );
+
+  const edgeAccents = useMemo(() => {
+    if (!structure) return new Map<string, EdgeAccent>();
+    return deriveEdgeAccents(
+      structure,
+      graphData?.edges ?? [],
+      display.endpointByFileId,
+    );
+  }, [structure, graphData, display]);
+
+  // Only meaningful while the frames are drawn: without them there is nothing on the
+  // canvas a cycle between groups could be read off.
+  const cyclicGroupIds = useMemo(() => {
+    if (!structure || !display.grouped) return new Set<string>();
+    return deriveCyclicGroupIds(structure);
+  }, [structure, display]);
+
+  const violationCounts = useMemo(() => {
+    let error = 0;
+    let warning = 0;
+    for (const violation of structure?.violations ?? []) {
+      if (violation.severity === "error") error++;
+      else warning++;
+    }
+    return { error, warning };
+  }, [structure]);
 
   if (!graphData) {
     return (
@@ -92,14 +177,20 @@ export default function App() {
         mode={mode}
         onModeToggle={handleModeToggle}
         onReset={handleReset}
+        showGroups={showGroups}
+        onGroupsToggle={handleGroupsToggle}
+        canToggleGroups={view === "local"}
+        canChangeDepth={view === "local"}
       />
       <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
         <FileGraph
-          graphData={graphData}
-          filteredNodes={filteredNodes}
-          visibleNodeIds={visibleNodeIds}
+          display={display}
+          edgeAccents={edgeAccents}
+          cyclicGroupIds={cyclicGroupIds}
           onNodeClick={openFile}
           mode={mode}
+          collapsedGroupIds={collapsedGroupIds}
+          onToggleCollapse={handleToggleCollapse}
         />
         <Legend
           layers={layers}
@@ -109,8 +200,12 @@ export default function App() {
       </div>
       <StatusBar
         currentFile={currentFile}
-        nodeCount={filteredNodes.length}
-        edgeCount={visibleEdgeCount}
+        nodeCount={display.fileNodes.length}
+        edgeCount={display.displayEdges.length}
+        cycleCount={structure?.cycles.length ?? 0}
+        groupCycleCount={display.grouped ? (structure?.groupCycles.length ?? 0) : 0}
+        errorCount={violationCounts.error}
+        warningCount={violationCounts.warning}
       />
     </div>
   );

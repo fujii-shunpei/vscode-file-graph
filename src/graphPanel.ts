@@ -1,5 +1,10 @@
 import * as vscode from "vscode";
 import { GraphData } from "./analyzer";
+import type {
+  GraphPayload,
+  StructureAnalysis,
+  UnresolvedImports,
+} from "./shared/graphTypes";
 
 export interface PanelCallbacks {
   onMessage?: (message: any) => void;
@@ -36,7 +41,10 @@ export class GraphPanel {
   static show(
     extensionUri: vscode.Uri,
     graphData: GraphData,
+    structure: StructureAnalysis,
+    unresolved: UnresolvedImports,
     focusLabel: string,
+    view: GraphPayload["view"],
     callbacks?: PanelCallbacks,
   ): GraphPanel {
     const column = vscode.ViewColumn.Beside;
@@ -44,7 +52,13 @@ export class GraphPanel {
     if (GraphPanel.currentPanel) {
       GraphPanel.currentPanel.panel.reveal(column);
       if (callbacks) GraphPanel.currentPanel.callbacks = callbacks;
-      GraphPanel.currentPanel.update(graphData, focusLabel);
+      GraphPanel.currentPanel.update(
+        graphData,
+        structure,
+        unresolved,
+        focusLabel,
+        view,
+      );
       return GraphPanel.currentPanel;
     }
 
@@ -63,25 +77,38 @@ export class GraphPanel {
 
     GraphPanel.currentPanel = new GraphPanel(panel, extensionUri);
     if (callbacks) GraphPanel.currentPanel.callbacks = callbacks;
-    GraphPanel.currentPanel.update(graphData, focusLabel);
+    GraphPanel.currentPanel.update(
+      graphData,
+      structure,
+      unresolved,
+      focusLabel,
+      view,
+    );
     return GraphPanel.currentPanel;
   }
 
-  private update(graphData: GraphData, focusLabel: string): void {
+  private update(
+    graphData: GraphData,
+    structure: StructureAnalysis,
+    unresolved: UnresolvedImports,
+    focusLabel: string,
+    view: GraphPayload["view"],
+  ): void {
     this.panel.title = `File Graph: ${focusLabel}`;
+    const payload: GraphPayload = { view, data: graphData, structure, unresolved };
 
     if (!this.initialized) {
-      this.panel.webview.html = this.getHtml(graphData);
+      this.panel.webview.html = this.getHtml(payload);
       this.initialized = true;
     } else {
       this.panel.webview.postMessage({
         command: "updateGraph",
-        data: graphData,
+        data: payload,
       });
     }
   }
 
-  private getHtml(graphData: GraphData): string {
+  private getHtml(payload: GraphPayload): string {
     const webview = this.panel.webview;
     const webviewDir = vscode.Uri.joinPath(this.extensionUri, "out", "webview");
 
@@ -93,7 +120,11 @@ export class GraphPanel {
     );
 
     const nonce = getNonce();
-    const data = JSON.stringify(graphData);
+    // Group names come from user settings, so the payload can contain `</script>`,
+    // which HTML would treat as the end of the inline script no matter that it sits
+    // inside a JS string. `<` is the same character to JSON.parse, not to the
+    // HTML tokenizer.
+    const data = JSON.stringify(payload).replace(/</g, "\\u003c");
 
     return /*html*/ `<!DOCTYPE html>
 <html lang="en">

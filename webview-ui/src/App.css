@@ -144,3 +144,8 @@
   flex-shrink: 0;
   white-space: nowrap;
 }
+
+.statusbar-flag {
+  margin-left: 12px;
+  font-weight: 600;
+}

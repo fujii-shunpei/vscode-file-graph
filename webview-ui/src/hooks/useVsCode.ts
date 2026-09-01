@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { GraphData } from "../types/graph";
+import type { GraphPayload } from "../types/graph";
 
 interface VsCodeApi {
   postMessage(message: unknown): void;
@@ -11,7 +11,7 @@ declare function acquireVsCodeApi(): VsCodeApi;
 
 declare global {
   interface Window {
-    __INITIAL_DATA__?: GraphData;
+    __INITIAL_DATA__?: GraphPayload;
   }
 }
 
@@ -20,7 +20,7 @@ const vscode = typeof acquireVsCodeApi === "function"
   : null;
 
 export function useVsCode() {
-  const [graphData, setGraphData] = useState<GraphData | null>(
+  const [graphPayload, setGraphPayload] = useState<GraphPayload | null>(
     window.__INITIAL_DATA__ ?? null,
   );
 
@@ -28,7 +28,7 @@ export function useVsCode() {
     const handler = (event: MessageEvent) => {
       const message = event.data;
       if (message.command === "updateGraph") {
-        setGraphData(message.data);
+        setGraphPayload(message.data);
       }
     };
     window.addEventListener("message", handler);
@@ -43,5 +43,5 @@ export function useVsCode() {
     vscode?.postMessage({ command: "setDepth", depth });
   }, []);
 
-  return { graphData, openFile, setDepth };
+  return { graphPayload, openFile, setDepth };
 }

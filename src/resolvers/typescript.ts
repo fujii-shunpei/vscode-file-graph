@@ -1,6 +1,8 @@
 import * as path from "path";
 import * as fs from "fs";
 import { LanguageResolver, ResolvedImport } from "./types";
+import { stripComments, TS_COMMENT_SYNTAX } from "./comments";
+import { toNodeId } from "../paths/pathId";
 
 interface TsConfig {
   paths: Record<string, string[]>;
@@ -20,11 +22,12 @@ export class TypeScriptResolver implements LanguageResolver {
     workspaceRoot: string
   ): ResolvedImport[] {
     const imports: ResolvedImport[] = [];
+    const source = stripComments(content, TS_COMMENT_SYNTAX);
 
     // ES module imports: import ... from '...'
     const importFromRegex = /\bimport\s+(?:[\w{}\s,*]+\s+from\s+)?['"]([^'"]+)['"]/g;
     let match;
-    while ((match = importFromRegex.exec(content)) !== null) {
+    while ((match = importFromRegex.exec(source)) !== null) {
       const specifier = match[1];
       const resolved = this.resolveSpecifier(specifier, filePath, workspaceRoot);
       imports.push({ raw: specifier, resolvedPath: resolved, type: "import" });
@@ -32,7 +35,7 @@ export class TypeScriptResolver implements LanguageResolver {
 
     // Dynamic import: import('...')
     const dynamicRegex = /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
-    while ((match = dynamicRegex.exec(content)) !== null) {
+    while ((match = dynamicRegex.exec(source)) !== null) {
       const specifier = match[1];
       const resolved = this.resolveSpecifier(specifier, filePath, workspaceRoot);
       imports.push({ raw: specifier, resolvedPath: resolved, type: "dynamic-import" });
@@ -40,7 +43,7 @@ export class TypeScriptResolver implements LanguageResolver {
 
     // CommonJS require: require('...')
     const requireRegex = /\brequire\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
-    while ((match = requireRegex.exec(content)) !== null) {
+    while ((match = requireRegex.exec(source)) !== null) {
       const specifier = match[1];
       const resolved = this.resolveSpecifier(specifier, filePath, workspaceRoot);
       imports.push({ raw: specifier, resolvedPath: resolved, type: "require" });
@@ -48,7 +51,7 @@ export class TypeScriptResolver implements LanguageResolver {
 
     // Re-exports: export ... from '...'
     const reExportRegex = /\bexport\s+(?:[\w{}\s,*]+\s+from\s+)['"]([^'"]+)['"]/g;
-    while ((match = reExportRegex.exec(content)) !== null) {
+    while ((match = reExportRegex.exec(source)) !== null) {
       const specifier = match[1];
       const resolved = this.resolveSpecifier(specifier, filePath, workspaceRoot);
       imports.push({ raw: specifier, resolvedPath: resolved, type: "re-export" });
@@ -99,20 +102,20 @@ export class TypeScriptResolver implements LanguageResolver {
   private tryResolveFile(base: string): string | null {
     // Exact match
     const stat = fs.statSync(base, { throwIfNoEntry: false });
-    if (stat?.isFile()) return base;
+    if (stat?.isFile()) return toNodeId(base);
 
     // Try extensions
     for (const ext of TypeScriptResolver.EXTENSIONS) {
       const candidate = base + ext;
       const s = fs.statSync(candidate, { throwIfNoEntry: false });
-      if (s?.isFile()) return candidate;
+      if (s?.isFile()) return toNodeId(candidate);
     }
 
     // Try index files
     for (const ext of TypeScriptResolver.EXTENSIONS) {
       const candidate = path.join(base, "index" + ext);
       const s = fs.statSync(candidate, { throwIfNoEntry: false });
-      if (s?.isFile()) return candidate;
+      if (s?.isFile()) return toNodeId(candidate);
     }
 
     return null;

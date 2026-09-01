@@ -18,6 +18,10 @@
       {
         "command": "fileGraph.showGraphFromFile",
         "title": "File Graph: Show Graph from Current File"
+      },
+      {
+        "command": "fileGraph.showOverview",
+        "title": "File Graph: Show Architecture Overview"
       }
     ],
     "menus": {
@@ -27,17 +31,86 @@
           "group": "navigation"
         }
       ]
+    },
+    "configuration": {
+      "title": "File Graph",
+      "properties": {
+        "fileGraph.groups.rules": {
+          "type": "array",
+          "default": [],
+          "scope": "resource",
+          "description": "ディレクトリをアーキテクチャ上のグループとして束ねるための glob 規則。配列の先頭から順に評価し、最初にマッチした規則が採用されます（layer の判定順と同じ方式）。ワークスペースルートからの相対パス（スラッシュ区切り）に対してマッチします。",
+          "items": {
+            "type": "object",
+            "required": ["pattern", "name"],
+            "properties": {
+              "pattern": {
+                "type": "string",
+                "description": "ワークスペースルート相対の glob パターン。アスタリスク1個・アスタリスク2個・クエスチョンマークに対応します。ブレース展開や否定パターンには対応していません。例として src/domain 配下すべてを指すには src/domain の後にスラッシュとアスタリスク2個を書きます。"
+              },
+              "name": {
+                "type": "string",
+                "description": "グループの表示名。"
+              }
+            }
+          }
+        },
+        "fileGraph.groups.autoDepth": {
+          "type": "number",
+          "default": 2,
+          "minimum": 0,
+          "maximum": 6,
+          "scope": "resource",
+          "description": "fileGraph.groups.rules のどれにもマッチしなかったファイルを、ワークスペースルートから数えた最初のN階層のディレクトリで自動的にグループ化します。0 を指定すると自動グループ化を無効にします。"
+        },
+        "fileGraph.rules.forbidden": {
+          "type": "array",
+          "default": [],
+          "scope": "resource",
+          "description": "グループ間で禁止する依存を宣言します。宣言していない依存はすべて許可されます。指定したグループの配下にあるグループも対象になります。",
+          "items": {
+            "type": "object",
+            "required": ["from", "to"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "違反が見つかったときに表示される名前。"
+              },
+              "from": {
+                "type": "string",
+                "description": "依存元のグループ ID。fileGraph.groups.rules で付けたグループ名か、ディレクトリの累積パス（例: src/domain）。"
+              },
+              "to": {
+                "type": "string",
+                "description": "依存先のグループ ID。この依存が見つかると違反として報告されます。"
+              },
+              "severity": {
+                "type": "string",
+                "enum": ["error", "warning"],
+                "default": "error",
+                "description": "違反の重大度。"
+              }
+            }
+          }
+        }
+      }
     }
   },
   "scripts": {
     "build:webview": "cd webview-ui && npm run build",
     "compile": "npm run build:webview && tsc -p ./",
     "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "test": "node ./out/test/runTest.js",
     "package": "npm run compile && vsce package"
   },
   "devDependencies": {
+    "@types/mocha": "^10.0.10",
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.85.0",
+    "@vscode/test-electron": "^3.1.0",
+    "glob": "^13.0.6",
+    "mocha": "^11.8.0",
     "typescript": "^5.3.0"
   }
 }
